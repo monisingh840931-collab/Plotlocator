@@ -1,0 +1,2985 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Plot Locator - Multi-Map Support</title>
+
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+
+    <!-- Turf.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+    <!-- QR Code Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+
+    <style>
+        :root {
+            --primary: #1e40af;
+            --primary-dark: #1e3a8a;
+            --surface: #ffffff;
+            --border: #e5e7eb;
+            --text-primary: #111827;
+            --text-secondary: #6b7280;
+            --shadow: 0 8px 16px -4px rgba(0,0,0,0.25);
+            --radius: 10px;
+            --transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            --green: #22c55e;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: #f9fafb; color: var(--text-primary); }
+        #map { position: fixed; inset: 0; z-index: 1; background: #e6eefc; }
+
+        /* Header */
+        .app-header { 
+            position: absolute; top: 12px; left: 12px; z-index: 1100; 
+            display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+        }
+        .app-title { 
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark)); 
+            padding: 8px 14px; border-radius: var(--radius); color: white; 
+            font-weight: 600; display: flex; gap: 5px; align-items: center; 
+            box-shadow: 0 10px 20px rgba(30, 64, 175, 0.5);
+        }
+        .app-title:hover { transform: translateY(-4px); box-shadow: 0 14px 24px rgba(30, 64, 175, 0.6); }
+        .control-buttons { display: flex; gap: 6px; }
+
+        
+.btn-3d {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  background: var(--surface); color: var(--text-primary); border: none;
+  padding: 7px 12px; border-radius: var(--radius); cursor: pointer;
+  font-weight: 600; font-size: 12px;
+  box-shadow: 0 6px 0 #777, 0 8px 14px rgba(0,0,0,0.35);
+  transform: translateY(0);
+  transition: var(--transition);
+}
+
+        .btn-3d:hover { 
+            transform: translateY(-6px) scale(1.08);
+            box-shadow: 0 14px 24px rgba(0,0,0,0.25);
+            background: #f8fafc; 
+        }
+        @keyframes buttonPressAnim {
+          0% { transform: translateY(0) scale(1); box-shadow: 0 6px 0 #555, 0 8px 14px rgba(0,0,0,0.35); }
+          50% { transform: translateY(3px) scale(0.97); box-shadow: 0 3px 0 #444, 0 4px 8px rgba(0,0,0,0.25); }
+          100% { transform: translateY(0) scale(1); box-shadow: 0 6px 0 #555, 0 8px 14px rgba(0,0,0,0.35); }
+        }
+        .btn-3d:active {
+          animation: buttonPressAnim 0.18s ease-in-out;
+        }
+        .btn-3d-primary { 
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark)); 
+            color: white; 
+            box-shadow: 0 8px 16px rgba(30, 64, 175, 0.5);
+        }
+        .btn-3d-primary:hover { 
+            box-shadow: 0 14px 24px rgba(30, 64, 175, 0.6);
+            transform: translateY(-6px) scale(1.08); 
+        }
+        .btn-icon { width: 32px; height: 32px; padding: 5px; }
+
+        .btn-3d.loading { position: relative; }
+        .btn-3d.loading::after {
+            content: ''; position: absolute; width: 14px; height: 14px; 
+            border: 2px solid #fff; border-top-color: transparent;
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.4); opacity: 0.6; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .pulse-marker { animation: pulse 1.5s infinite; }
+
+        /* Sidebar (Menu) - Made more compact */
+        .sidebar {
+        position: absolute; left: 12px; top: 70px; z-index: 1050;
+        width: 160px; /* चौड़ाई आधी की गई */
+        max-width: 40vw; /* अधिकतम चौड़ाई भी आधी */
+        background: rgba(255, 255, 255, 0.10);
+        backdrop-filter: blur(20px) saturate(180%);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        border-radius: 16px;
+        transform: translateX(-110%);
+        transition: var(--transition);
+        overflow: hidden; max-height: none;
+        display: flex; flex-direction: column;
+        border: 1px solid rgba(255,255,255,0.3);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+        .sidebar.open { transform: translateX(0); }
+        .sidebar-header { 
+            padding: 6px 10px; background: linear-gradient(135deg, var(--primary), var(--primary-dark)); 
+            color: #fff; display: flex; align-items: center; justify-content: space-between; 
+            font-weight: 600; font-size: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); 
+        }
+        .sidebar-content { padding: 8px; overflow-y: visible; display: flex; flex-direction: column; gap: 6px; }
+
+        .section {
+        background: rgba(255,255,255,0.25);
+        backdrop-filter: blur(12px) saturate(180%);
+        -webkit-backdrop-filter: blur(12px) saturate(180%);
+        padding: 8px; border-radius: 14px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        margin-bottom: 6px;
+        border: 1px solid rgba(255,255,255,0.35);
+    }
+        .section-title { 
+            font-weight: 600; font-size: 10px; display: flex; gap: 5px; 
+            align-items: center; color: var(--text-primary); margin-bottom: 2px; 
+        }
+
+        .form-group { margin-bottom: 2px; }
+        .form-label { font-size: 9px; color: var(--text-secondary); margin-bottom: 2px; display: block; font-weight: 500; }
+        .input { 
+            width: 100%; padding: 4px 6px; border-radius: var(--radius); 
+            border: 1px solid var(--border); background: var(--surface); 
+            color: var(--text-primary); font-size: 9px; transition: var(--transition); 
+        }
+        .input:focus { 
+            border-color: var(--primary); box-shadow: 0 0 0 2px rgba(30, 64, 175, 0.15); outline: none; 
+        }
+
+        .input-group { display: flex; gap: 3px; align-items: center; }
+        .input-group .input { flex: 1; }
+        .input-group .btn-3d {
+        display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+        background: var(--surface); color: var(--text-primary); border: none;
+        padding: 7px 12px; border-radius: var(--radius); cursor: pointer;
+        font-weight: 600; font-size: 12px;
+        box-shadow: 0 6px 0 #999, 0 6px 12px rgba(0,0,0,0.3);
+        transform: translateY(0);
+        transition: var(--transition);
+    }
+
+        .sidebar .btn-3d {
+        display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+        background: var(--surface); color: var(--text-primary); border: none;
+        padding: 5px 8px; border-radius: var(--radius); cursor: pointer;
+        font-weight: 600; font-size: 10px;
+        box-shadow: 0 6px 0 #999, 0 6px 12px rgba(0,0,0,0.3);
+        transform: translateY(0);
+        transition: var(--transition);
+    }
+        .sidebar .btn-3d span { display: none; }
+        .sidebar .btn-3d i { font-size: 12px; }
+
+        .toggle-group { display: flex; justify-content: space-between; align-items: center; padding: 3px; }
+        .toggle-label { display: flex; gap: 5px; align-items: center; font-weight: 500; color: var(--text-primary); font-size: 9px; }
+
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative; display: inline-block; width: 45px; height: 22px;
+        }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc; transition: .4s; border-radius: 22px;
+        }
+        .toggle-slider:before {
+            position: absolute; content: ""; height: 14px; width: 14px; left: 4px; bottom: 4px;
+            background-color: white; transition: .4s; border-radius: 50%;
+        }
+        input:checked + .toggle-slider { background-color: var(--primary); }
+        input:checked + .toggle-slider:before { transform: translateX(23px); }
+
+        .leaflet-control-zoom { 
+            border: none !important; border-radius: var(--radius) !important; 
+            overflow: hidden; box-shadow: 0 8px 16px rgba(0,0,0,0.15) !important;
+        }
+        .leaflet-control-zoom a { 
+            background: var(--surface) !important; color: var(--text-primary) !important; 
+            width: 32px; height: 32px; line-height: 32px; font-size: 14px; 
+        }
+        .leaflet-popup-content-wrapper { 
+            background: var(--surface); border-radius: var(--radius); 
+            border: 1px solid var(--border); padding: 8px; 
+            box-shadow: 0 12px 24px rgba(0,0,0,0.2);
+        }
+        .leaflet-popup-close-button { 
+            background: var(--primary); color: #fff; border-radius: 50%; 
+            width: 22px; height: 22px; line-height: 22px; top: 6px; right: 6px; 
+        }
+
+        .toast { 
+            position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 2000; 
+            padding: 8px 14px; background: var(--surface); border-radius: var(--radius); 
+            box-shadow: 0 12px 24px rgba(0,0,0,0.25); display: flex; gap: 6px; 
+            align-items: center; opacity: 0; transition: var(--transition); pointer-events: none; 
+            border: 1px solid var(--border); 
+        }
+        .toast.show { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+
+        .map-legend, .leaflet-control-attribution { display: none !important; }
+
+        /* Settings Panel Styles - UPDATED WITH GLASS LOOK AND REDUCED WIDTH */
+        .settings-panel {
+            position: absolute; 
+            right: 12px; 
+            top: 70px; 
+            z-index: 1050;
+            width: 160px; /* चौड़ाई आधी की गई */
+            max-width: 40vw; /* अधिकतम चौड़ाई भी आधी */
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(25px) saturate(200%);
+            -webkit-backdrop-filter: blur(25px) saturate(200%);
+            border-radius: 20px;
+            padding: 16px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.4), 
+                        0 0 0 1px rgba(255, 255, 255, 0.2) inset;
+            border: 1px solid rgba(255,255,255,0.4);
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .settings-panel.open {
+            display: flex;
+        }
+        
+        .settings-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        
+        .settings-title {
+            font-weight: 600;
+            font-size: 16px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            color: var(--text-primary);
+            text-shadow: 0 1px 2px rgba(255, 255, 255, 0.5);
+        }
+
+        /* Enhanced glass effect for sections inside settings panel */
+        .settings-panel .section {
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(15px) saturate(180%);
+            -webkit-backdrop-filter: blur(15px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15), 
+                        0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar, .settings-panel {
+                width: calc(50vw - 24px); /* मोबाइल पर भी आधी चौड़ाई */
+                max-width: 200px;
+            }
+            
+            .app-header {
+                top: 8px;
+                left: 8px;
+            }
+            
+            .app-title {
+                font-size: 14px;
+                padding: 6px 10px;
+            }
+            
+            .btn-3d {
+                font-size: 11px;
+                padding: 6px 10px;
+            }
+            
+            .leaflet-control-zoom {
+                bottom: 60px !important;
+            }
+        }
+
+        /* Menu Button Blue */
+        #menuBtn {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            color: white;
+            box-shadow: 0 8px 16px rgba(30, 64, 175, 0.5);
+        }
+        #menuBtn:hover {
+            background: linear-gradient(135deg, var(--primary-dark), #1e3a8a);
+            box-shadow: 0 14px 24px rgba(30, 64, 175, 0.6);
+            transform: translateY(-6px) scale(1.08);
+        }
+        
+        /* Settings Button */
+        #settingsBtn {
+            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+            color: white;
+            box-shadow: 0 8px 16px rgba(139, 92, 246, 0.5);
+        }
+        #settingsBtn:hover {
+            background: linear-gradient(135deg, #7c3aed, #6d28d9);
+            box-shadow: 0 14px 24px rgba(139, 92, 246, 0.6);
+            transform: translateY(-6px) scale(1.08);
+        }
+
+        /* Green for active location toggle */
+        .btn-3d.active {
+            background: linear-gradient(135deg, var(--green), #16a34a);
+            color: white;
+        }
+        .btn-3d.active:hover {
+            background: linear-gradient(135deg, #16a34a, #15803d);
+        }
+
+        /* नए स्टाइल जोड़े गए */
+        .drop-zone {
+            border: 2px dashed #1e40af;
+            border-radius: var(--radius);
+            padding: 6px;
+            text-align: center;
+            margin-top: 6px;
+            background-color: #f0f5ff;
+            cursor: pointer;
+            transition: var(--transition);
+            font-size: 8px;
+        }
+        .drop-zone:hover {
+            background-color: #e0e9ff;
+        }
+        .drop-zone.dragover {
+            background-color: #d0dfff;
+            border-color: #3b82f6;
+        }
+        .sample-data-btn {
+            width: 100%;
+            margin-top: 6px;
+        }
+        .file-input-hidden {
+            display: none;
+        }
+    
+        /* Enhanced Report Styles */
+        #reportModalBackdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:99999;display:none;align-items:center;justify-content:center}
+        #reportModal{background:#fff;width:210mm;height:297mm;max-width:95%;border:2px solid #333;padding:20px;position:relative;box-shadow:0 0 20px rgba(0,0,0,0.4);display:flex;flex-direction:column;}
+        .watermark{position:absolute;top:45%;left:50%;transform:translate(-50%,-50%);font-size:48px;color:rgba(0,0,0,0.07);font-weight:900;pointer-events:none;}
+
+        .report-header{text-align:center;margin-bottom:15px;padding-bottom:10px;border-bottom:2px solid #000;}
+
+        .report-meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 25px;font-size:16px;font-weight:600;margin-bottom:5px;flex:1;}
+        .report-meta div span{font-weight:normal;}
+
+        #reportCanvas{width:100%;height:300px;border:1px solid #333;margin: 0 0 10px 0;}
+
+        .report-footer{position:absolute;bottom:20px;left:20px;right:20px;display:flex;justify-content:space-between;align-items:flex-end;font-size:14px;border-top:1px solid #ccc;padding-top:10px;}
+        .signature{display:flex;flex-direction:column;align-items:center;}
+        .verified{width:50px;height:50px;border-radius:50%;background:#22c55e;display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;margin-bottom:6px;}
+
+        /* Attractive Compass - Moved closer to drawing */
+        #compass{position:absolute;top:200px;right:40px;width:60px;height:60px;border:2px solid #000;border-radius:50%;display:flex;align-items:center;justify-content:center;}
+        #compass .cross{position:absolute;width:2px;height:100%;background:#000;}
+        #compass .cross::after{content:'';position:absolute;left:-29px;top:50%;width:60px;height:2px;background:#000;}
+        #compass .arrow{position:absolute;font-weight:bold;font-size:12px;}
+        #compass .arrow.n{top:-15px;left:50%;transform:translateX(-50%);}
+        #compass .arrow.s{bottom:-15px;left:50%;transform:translateX(-50%);}
+        #compass .arrow.e{right:-15px;top:50%;transform:translateY(-50%);}
+        #compass .arrow.w{left:-15px;top:50%;transform:translateY(-50%);}
+
+        #plotInfoModalBackdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:none;align-items:center;justify-content:center;z-index:3000;}
+        #plotInfoModal{background:#fff;padding:20px;border-radius:6px;width:400px;}
+
+        /* Updated header with cursive font for Plot Locator */
+        .bihar-header {background:#1e40af;color:#fff;padding:10px;border-radius:8px;margin-bottom:10px;}
+        .bihar-header div:first-child {font-size:28px;font-weight:bold;letter-spacing:2px;}
+        .bihar-header div:nth-child(2) {font-size:32px;font-weight:bold;margin:5px 0;font-family: 'Dancing Script', cursive;}
+        .bihar-header div:last-child {font-size:20px;font-weight:bold;}
+
+        .description-container {
+          grid-column: 1 / span 2;
+          margin-top: 10px;
+          padding: 10px;
+          border: 1px solid #ccc;
+          border-radius: 4px;
+          background: #f9f9f9;
+        }
+
+        .description-container b {
+          display: block;
+          margin-bottom: 5px;
+        }
+
+        @page { size: A4; margin: 20mm; }
+        @media print{
+          body *{visibility:hidden}
+          #reportModal,#reportModal *{visibility:visible}
+          #reportModal{position:fixed;left:0;top:0;width:210mm;height:297mm;border:0;}
+          .watermark{font-size:100px;}
+        }
+
+        /* Offline indicator */
+        .offline-indicator {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 1100;
+            background: #ef4444;
+            color: white;
+            padding: 6px 10px;
+            border-radius: var(--radius);
+            font-size: 12px;
+            font-weight: 600;
+            display: none;
+            align-items: center;
+            gap: 5px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        /* Loading indicator */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            display: none;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        /* Hidden report container for downloading */
+        #hiddenReportContainer {
+            position: fixed;
+            left: -9999px;
+            top: -9999px;
+            width: 210mm;
+            height: 297mm;
+            z-index: -9999;
+            visibility: hidden;
+        }
+
+        /* QR Code Styles */
+        .qr-code-container {
+            text-align: center;
+            margin: 10px 0;
+            padding: 10px;
+            border-top: 1px solid #ccc;
+            border-bottom: 1px solid #ccc;
+        }
+
+        .qr-code-title {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 5px;
+            color: #333;
+        }
+
+        #qrCodeCanvas {
+            border: 1px solid #ddd;
+            padding: 5px;
+            background: white;
+            display: inline-block;
+            width: 120px;
+            height: 120px;
+        }
+
+        /* Confirmation Popup Styles */
+        #confirmationModalBackdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 4000;
+        }
+        
+        #confirmationModal {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            width: 300px;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+        
+        .confirmation-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        
+        .confirmation-btn {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+        
+        .confirm-yes {
+            background: #22c55e;
+            color: white;
+        }
+        
+        .confirm-no {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .confirmation-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        /* Save Settings Button Style */
+        .save-settings-btn {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+        }
+        
+        .save-settings-btn:hover {
+            background: linear-gradient(135deg, #059669, #047857);
+            box-shadow: 0 14px 24px rgba(5, 150, 105, 0.6);
+        }
+
+        /* Login/Signup Modal Styles */
+        .auth-modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        
+        .auth-modal {
+            background: #fff;
+            padding: 25px;
+            border-radius: 12px;
+            width: 380px;
+            max-width: 90vw;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+        }
+        
+        .auth-header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .auth-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1e40af;
+            margin-bottom: 8px;
+        }
+        
+        .auth-subtitle {
+            color: #6b7280;
+            font-size: 14px;
+        }
+        
+        .auth-form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .auth-input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        
+        .auth-input:focus {
+            outline: none;
+            border-color: #1e40af;
+            box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+        }
+        
+        .auth-button {
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 10px;
+        }
+        
+        .auth-button-primary {
+            background: linear-gradient(135deg, #1e40af, #1e3a8a);
+            color: white;
+        }
+        
+        .auth-button-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(30, 64, 175, 0.3);
+        }
+        
+        .auth-button-secondary {
+            background: #f3f4f6;
+            color: #374151;
+        }
+        
+        .auth-button-secondary:hover {
+            background: #e5e7eb;
+        }
+        
+        .auth-switch {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+        
+        .auth-switch-button {
+            background: none;
+            border: none;
+            color: #1e40af;
+            cursor: pointer;
+            font-weight: 600;
+            text-decoration: underline;
+        }
+        
+        .auth-error {
+            color: #ef4444;
+            font-size: 13px;
+            margin-top: 5px;
+            display: none;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: white;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        /* Logout Button Style */
+        .logout-btn {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+        }
+        
+        .logout-btn:hover {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            box-shadow: 0 14px 24px rgba(220, 38, 38, 0.6);
+        }
+    </style>
+</head>
+<body>
+    <!-- Login/Signup Modal -->
+    <div id="authModalBackdrop" class="auth-modal-backdrop">
+        <div class="auth-modal">
+            <div class="auth-header">
+                <div class="auth-title" id="authTitle">Login to Plot Locator</div>
+                <div class="auth-subtitle" id="authSubtitle">Access your account to continue</div>
+            </div>
+            
+            <form id="authForm" class="auth-form">
+                <div id="nameField" style="display: none;">
+                    <input type="text" id="authName" class="auth-input" placeholder="Full Name" required>
+                    <div class="auth-error" id="nameError"></div>
+                </div>
+                
+                <div>
+                    <input type="email" id="authEmail" class="auth-input" placeholder="Email Address" required>
+                    <div class="auth-error" id="emailError"></div>
+                </div>
+                
+                <div>
+                    <input type="password" id="authPassword" class="auth-input" placeholder="Password" required>
+                    <div class="auth-error" id="passwordError"></div>
+                </div>
+                
+                <button type="submit" class="auth-button auth-button-primary" id="authSubmitButton">Login</button>
+            </form>
+            
+            <div class="auth-switch">
+                <span id="authSwitchText">Don't have an account?</span>
+                <button type="button" class="auth-switch-button" id="authSwitchButton">Sign up</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="map"></div>
+    
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+    </div>
+    
+    <div class="offline-indicator" id="offlineIndicator">
+        <i class="fas fa-wifi-slash"></i>
+        <span>ऑफ़लाइन</span>
+    </div>
+
+    <!-- Hidden report container for downloading -->
+    <div id="hiddenReportContainer"></div>
+
+    <div class="app-header">
+        <div class="app-title">
+            <i class="fas fa-map-marker-alt"></i>
+            <span id="appTitleText">Plot Locator</span>
+            <div class="user-info" id="userInfo" style="display: none;">
+                <div class="user-avatar" id="userAvatar"></div>
+                <span id="userName"></span>
+            </div>
+        </div>
+        <div class="control-buttons">
+            <button id="menuBtn" class="btn-3d" title="मेन्यू">
+                <i class="fas fa-bars"></i><span>मेन्यू</span>
+            </button>
+            <button id="settingsBtn" class="btn-3d" title="सेटिंग्स">
+                <i class="fas fa-cog"></i><span>सेटिंग्स</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div id="settingsPanel" class="settings-panel">
+        <div class="settings-header">
+            <div class="settings-title">
+                <i class="fas fa-cog"></i>
+                <span id="settingsTitle">सेटिंग्स</span>
+            </div>
+            <button id="closeSettingsBtn" class="btn-3d btn-icon" title="बंद करें">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <!-- User Info Section -->
+        <div class="section" id="userInfoSection">
+            <div class="section-title">
+                <i class="fas fa-user"></i><span id="userInfoTitle">User Info</span>
+            </div>
+            <div class="user-info-settings">
+                <div style="font-size: 11px; margin-bottom: 8px; color: var(--text-secondary);">
+                    Logged in as: <span id="currentUserName"></span>
+                </div>
+                <button id="logoutBtn" class="btn-3d logout-btn" title="Logout">
+                    <i class="fas fa-sign-out-alt"></i><span>Logout</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Map Settings Section -->
+        <div class="section">
+            <div class="section-title">
+                <i class="fas fa-map"></i><span id="mapSettingsTitle">मैप सेटिंग्स</span>
+            </div>
+            <div class="map-type-selector-menu">
+                <button class="btn-3d map-type-btn-menu active" data-map-type="google" title="Google Satellite">
+                    <i class="fas fa-globe"></i><span>Google</span>
+                </button>
+                <button class="btn-3d map-type-btn-menu" data-map-type="esri" title="Esri Satellite">
+                    <i class="fas fa-satellite"></i><span>Esri</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Display Settings Section -->
+        <div class="section">
+            <div class="section-title">
+                <i class="fas fa-layer-group"></i><span id="displaySettingsTitle">डिस्प्ले सेटिंग</span>
+            </div>
+            <div class="toggle-group">
+                <div class="toggle-label">
+                    <i class="fas fa-vector-square"></i><span id="showPlotsLabel">प्लॉट्स दिखाएं</span>
+                </div>
+                <label class="toggle-switch" title="प्लॉट्स दिखाएं/छुपाएँ">
+                    <input type="checkbox" id="togglePlots" checked />
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="toggle-group">
+                <div class="toggle-label">
+                    <i class="fas fa-tag"></i><span id="showLabelsLabel">प्लॉट नंबर दिखाएं</span>
+                </div>
+                <label class="toggle-switch" title="प्लॉट नंबर दिखाएँ/छुपाएँ">
+                    <input type="checkbox" id="toggleLabels" />
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+        
+        <!-- Language Settings Section -->
+        <div class="section">
+            <div class="section-title">
+                <i class="fas fa-language"></i><span id="languageSettingsTitle">भाषा सेटिंग</span>
+            </div>
+            <button id="languageBtn" class="btn-3d" title="भाषा बदलें">
+                <i class="fas fa-language"></i><span>English</span>
+            </button>
+        </div>
+
+        <!-- Save Settings Section -->
+        <div class="section">
+            <div class="section-title">
+                <i class="fas fa-save"></i><span id="saveSettingsTitle">सेटिंग्स सहेजें</span>
+            </div>
+            <button id="saveSettingsBtn" class="btn-3d save-settings-btn" title="सेटिंग्स सहेजें">
+                <i class="fas fa-save"></i><span>सेटिंग्स सहेजें</span>
+            </button>
+        </div>
+        
+        <!-- Help Section -->
+        <div class="section">
+            <div class="section-title">
+                <i class="fas fa-question-circle"></i><span id="helpTitle">सहायता</span>
+            </div>
+            <button id="userGuideBtn" class="btn-3d" title="उपयोग गाइड">
+                <i class="fas fa-book"></i><span>गाइड</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Menu Sidebar -->
+    <div id="sidebar" class="sidebar" aria-hidden="true">
+        <div class="sidebar-header">
+            <span id="sidebarTitle">Plot Locator टूल्स</span>
+            <button id="closeSidebarBtn" class="btn-3d btn-icon" title="बंद करें">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="sidebar-content">
+            <!-- नया GeoJSON अपलोड सेक्शन जोड़ा गया -->
+            <div class="section">
+                <div class="section-title">
+                    <i class="fas fa-file-upload"></i><span id="dataLoadTitle">डेटा लोड करें</span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" id="fileInputLabel">GeoJSON फाइल चुनें</label>
+                    <div class="input-group">
+                        <input type="file" id="geoJSONFileInput" class="file-input-hidden" accept=".geojson,.json" multiple />
+                        <button id="fileSelectBtn" class="btn-3d" title="फाइल चुनें">
+                            <i class="fas fa-folder-open"></i><span>फाइल चुनें</span>
+                        </button>
+                    </div>
+                    <div class="drop-zone" id="dropZone">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <div id="dropText">या GeoJSON फाइल यहाँ ड्रॉप करें</div>
+                    </div>
+                    <div style="display:flex; gap:5px; margin-top:3px;">
+                        <button id="geojsonResetBtn" class="btn-3d" title="GeoJSON हटाएँ"><i class="fas fa-trash"></i><span>GeoJSON हटाएँ</span></button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div style="display:flex; flex-wrap:wrap; gap:2px;">
+                    <button id="homeBtn" class="btn-3d btn-icon" title="होम">
+                        <i class="fas fa-home"></i>
+                    </button>
+
+                    <button id="locateBtn" class="btn-3d btn-icon" title="मेरी लोकेशन">
+                        <i class="fas fa-location-crosshairs"></i>
+                    </button>
+                    <button id="fitBtn" class="btn-3d btn-icon" title="सभी दिखाएं">
+                        <i class="fas fa-expand"></i>
+                    </button>
+                
+                    <button id="locationToggleBtn" class="btn-3d btn-icon" title="लोकेशन ON/OFF">
+                        <i class="fas fa-crosshairs"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <i class="fas fa-search"></i><span id="plotSearchTitle">प्लॉट खोजें</span>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" id="plotInputLabel">प्लॉट नंबर दर्ज करें</label>
+                    <div class="input-group">
+                        <input id="multiPlotInput" class="input" placeholder="उदा: 2576 या 2576,2577" />
+                        <button id="multiSearchBtn" class="btn-3d btn-3d-primary" title="प्लॉट खोजें">
+                            <i class="fas fa-search"></i><span>खोज</span>
+                        </button>
+                    </div>
+                    <div style="font-size:9px;color:var(--text-secondary);margin-top:3px;" id="maxPlotText">
+                        अधिकतम 5 प्लॉट एक साथ खोजें
+                    </div>
+                </div>
+                <div style="display:flex; gap:5px; margin-top:3px;">
+                    <button id="resetSearchBtn" class="btn-3d" title="रीसेट">
+                        <i class="fas fa-refresh"></i><span>रीसेट</span>
+                    </button>
+                    <button id="voiceBtn" class="btn-3d" title="वॉयस सर्च">
+                        <i class="fas fa-microphone"></i><span>आवाज</span>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">
+                    <i class="fas fa-ruler-combined"></i><span id="manualMeasureTitle">मैनुअल माप टूल</span>
+                </div>
+                <button id="measureToggleBtn" class="btn-3d" title="मैनुअल माप">
+                    <i class="fas fa-ruler"></i><span>माप</span>
+                </button>
+                <div id="measurePanel" class="measure-panel" style="display:none; margin-top:5px;">
+                    <div style="display:flex; flex-direction:column; gap:3px;">
+                        <div style="display:flex; gap:3px; flex-wrap:wrap;">
+                            <button id="startMeasureBtn" class="btn-3d" title="शुरू">
+                                <i class="fas fa-play"></i><span>शुरू</span>
+                            </button>
+                            <button id="undoMeasureBtn" class="btn-3d" disabled title="पूर्ववत">
+                                <i class="fas fa-undo"></i><span>पूर्ववत</span>
+                            </button>
+                            <button id="finishMeasureBtn" class="btn-3d" disabled title="समाप्त">
+                                <i class="fas fa-check"></i><span>समाप्त</span>
+                            </button>
+                            <button id="clearMeasureBtn" class="btn-3d" title="साफ़">
+                                <i class="fas fa-trash"></i><span>साफ़</span>
+                            </button>
+                        </div>
+                        <div id="measureInfo" class="measure-info" style="background:var(--surface); padding:5px; border-radius:var(--radius); border:1px solid var(--border); color:var(--text-secondary);">
+                            बिंदु: 0
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" id="unitLabel">माप इकाई</label>
+                            <select id="unitSelect" class="input">
+                                <option value="sqft">वर्ग फुट (sq ft)</option>
+                                <option value="sqm" selected>वर्ग मीटर (sq m)</option>
+                                <option value="acre">एकड़ (acre)</option>
+                                <option value="dismil">डिसमिल (dismil)</option>
+                                <option value="bigha">बीघा (bigha)</option>
+                                <option value="kattha">कट्ठा (kattha)</option>
+                                <option value="dhur">धुर (dhur)</option>
+                                <option value="dhurki">धुरकी (dhurki)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Guide Panel -->
+    <div id="userGuidePanel" class="guide-panel" style="position:absolute; left:12px; top:70px; z-index:1050; width:260px; max-width:80vw; background:var(--surface); border-radius:var(--radius); padding:14px; transform:translateX(-120%); transition:all .3s cubic-bezier(0.25, 0.8, 0.25, 1); box-shadow: 0 12px 24px rgba(0,0,0,0.25); border:1px solid var(--border);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <div style="font-weight:600; display:flex; gap:6px; align-items:center;">
+                <i class="fas fa-book-open"></i> <span id="guideTitle">उपयोग गाइड</span>
+            </div>
+            <button id="closeGuideBtn" class="btn-3d btn-icon" title="बंद">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div id="userGuideContent" style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+            <h3 style="font-size:13px; color:var(--text-primary); margin-bottom:6px;" id="guideSubtitle">Plot Locator गाइड</h3>
+            <ul style="padding-left:18px; margin-top:6px;">
+                <li><b id="guideSearch">प्लॉट्स खोज:</b> <span id="guideSearchDesc">मेन्यू खोलकर नंबर डालें (उदा. 2576 या 2576,2577) और खोज दबाएँ।</span></li>
+                <li><b id="guideNumbers">प्लॉट नंबर:</b> <span id="guideNumbersDesc">'प्लॉट नंबर दिखाएं' टॉगल से ज़ूम पर नंबर दिखेंगे (ज़ूम 16+)।</span></li>
+                <li><b id="guideLocation">मेरी लोकेशन:</b> <span id="guideLocationDesc">लोकेशन बटन दबाकर अपनी स्थिति देखें।</span></li>
+                <li><b id="guideManual">मैनुअल माप:</b> <span id="guideManualDesc">माप शुरू करें → नक्शे पर क्लिक करके बिंदु जोड़ें → समाप्त पर क्लिक करें。</</span></li>
+                <li><b id="guideDataLoad">डेटा लोड:</b> <span id="guideDataLoadDesc">GeoJSON फाइल अपलोड करें या उदाहरण डेटा लोड करें।</span></li>
+            </ul>
+            <p style="margin-top:8px; font-size:10px; color:var(--text-secondary);" id="guideNote">नोट: आप GeoJSON फाइल अपलोड कर सकते हैं या उदाहरण डेटा का उपयोग कर सकते हैं।</p>
+        </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite">
+        <i class="fas fa-info-circle"></i><span id="toastMessage"></span>
+    </div>
+
+    <div class="map-legend" aria-hidden="true" style="position:absolute; bottom:18px; right:8px; z-index:1000; background:var(--surface); padding:10px; border-radius:var(--radius); box-shadow:0 8px 16px rgba(0,0,0,0.15); border:1px solid var(--border);">
+        <div style="display:flex; gap:6px; align-items:center;">
+            <div style="width:18px;height:18px;background:#f59e0b;border-radius:3px;"></div>
+            <span>प्लॉट क्षेत्र</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; margin-top:5px;">
+            <div style="width:18px;height:18px;background:#ef4444;border-radius:3px;"></div>
+            <span>चयनित प्लॉट</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; margin-top:5px;">
+            <div style="width:18px;height:18px;border-radius:50%;background:transparent;border:3px solid white;"></div>
+            <span>मैनुअल माप बिंदु</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center; margin-top:5px;">
+            <div style="width:18px;height:18px;border-radius:50%;background:#2563eb;border:2px solid white;"></div>
+            <span>रियल-टाइम लोकेशन</span>
+        </div>
+    </div>
+
+    <!-- Confirmation Popup -->
+    <div id="confirmationModalBackdrop">
+        <div id="confirmationModal">
+            <h3>रिपोर्ट जनरेट करें</h3>
+            <p>क्या आप इस प्लॉट की रिपोर्ट जनरेट करना चाहते हैं?</p>
+            <div class="confirmation-buttons">
+                <button id="confirmYes" class="confirmation-btn confirm-yes">हाँ</button>
+                <button id="confirmNo" class="confirmation-btn confirm-no">नहीं</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Report Modal -->
+    <div id="reportModalBackdrop">
+        <div id="reportModal">
+            <div class="watermark">PlotLocator Report</div>
+            
+            <div class="report-header">
+                <!-- Bihar Government Header -->
+                <div class="bihar-header">
+                    <div>B</div>
+                    <div>Plot Locator</div>
+                    <div>PLOT REPORT</div>
+                </div>
+                <!-- Title removed as requested -->
+            </div>
+
+            <div class="report-meta">
+                <div><b>खाता नं:</b> <span id="reportAccount">N/A</span></div>
+                <div><b>प्लॉट नं:</b> <span id="reportPlot">N/A</span></div>
+                <div><b>थाना नं:</b> <span id="reportThana">N/A</span></div>
+                <div><b>क्षेत्रफल:</b> <span id="reportArea">N/A</span></div>
+                <div><b>मालिक का नाम:</b> <span id="reportOwner">N/A</span></div>
+                <div><b>गांव/मौजा:</b> <span id="reportVillage">N/A</span></div>
+                <div><b>ब्लॉक:</b> <span id="reportBlock">N/A</span></div>
+                <div><b>जिला:</b> <span id="reportDistrict">N/A</span></div>
+                
+                <!-- Description placed below district -->
+                <div class="description-container">
+                    <b>विवरण:</b> <span id="descriptionText">N/A</span>
+                </div>
+            </div>
+
+            <canvas id="reportCanvas" width="600" height="300"></canvas>
+
+            <!-- QR Code Section - Added below drawing and above footer -->
+            <div class="qr-code-container">
+                <div class="qr-code-title">Scan for Digital Verification</div>
+                <canvas id="qrCodeCanvas" width="120" height="120"></canvas>
+                <div style="font-size: 10px; margin-top: 5px; color: #666;">
+                    Plot Locator Digital Report
+                </div>
+            </div>
+
+            <div id="compass">
+                <div class="cross"></div>
+                <div class="arrow n">N</div>
+                <div class="arrow s">S</div>
+                <div class="arrow e">E</div>
+                <div class="arrow w">W</div>
+            </div>
+
+            <div class="report-footer">
+                <div id="reportDateTime">Date/Time</div>
+                <div>Report generated by PlotLocator</div>
+                <div class="signature">
+                    <div class="verified"><i class="fas fa-check"></i></div>
+                    <div>Verified by PlotLocator</div>
+                    <small id="officerName">Officer Name</small>
+                </div>
+            </div>
+            <button id="closeReportBtn" style="position:absolute;top:10px;right:10px;">X</button>
+            <button id="exportJPGBtn" style="position:absolute;top:10px;right:60px;">Export JPG</button>
+        </div>
+    </div>
+
+    <!-- Plot Info Modal - नया Download Report बटन जोड़ा गया -->
+    <div id="plotInfoModalBackdrop">
+        <div id="plotInfoModal">
+            <h3>Plot Details</h3>
+            <label>खाता नं: <input id="inputAccount" type="text"></label><br>
+            <label>प्लॉट नं: <input id="inputPlot" type="text"></label><br>
+            <label>थाना नं: <input id="inputThana" type="text"></label><br>
+            <label>मालिक का नाम: <input id="inputOwner" type="text"></label><br>
+            <label>गांव/मौजा: <input id="inputVillage" type="text"></label><br>
+            <label>ब्लॉक: <input id="inputBlock" type="text"></label><br>
+            <label>जिला: <input id="inputDistrict" type="text"></label><br>
+            <!-- Officer name field removed and will be auto-filled with logged in user's name -->
+            <label>विवरण (Description):</label><br>
+            <textarea id="inputDescription" placeholder="Enter plot description here..." style="width: 100%; min-height: 80px; margin-top: 5px;"></textarea><br><br>
+            
+            <!-- नया Download Report बटन जोड़ा गया -->
+            <div style="display: flex; gap: 10px; justify-content: space-between;">
+                <button id="savePlotInfo" style="flex: 1;">Save</button>
+                <button id="downloadReportBtn" style="flex: 1; background: #22c55e; color: white; border: none; padding: 8px; border-radius: 5px; cursor: pointer;">
+                    <i class="fas fa-download"></i> Download Report
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+    <script>
+        // Authentication System
+        let currentUser = null;
+        let isLoginMode = true;
+
+        // DOM Elements for Auth
+        const authModalBackdrop = document.getElementById('authModalBackdrop');
+        const authForm = document.getElementById('authForm');
+        const authTitle = document.getElementById('authTitle');
+        const authSubtitle = document.getElementById('authSubtitle');
+        const authSubmitButton = document.getElementById('authSubmitButton');
+        const authSwitchButton = document.getElementById('authSwitchButton');
+        const authSwitchText = document.getElementById('authSwitchText');
+        const nameField = document.getElementById('nameField');
+        const authName = document.getElementById('authName');
+        const authEmail = document.getElementById('authEmail');
+        const authPassword = document.getElementById('authPassword');
+        const nameError = document.getElementById('nameError');
+        const emailError = document.getElementById('emailError');
+        const passwordError = document.getElementById('passwordError');
+        
+        // User Info Elements
+        const userInfo = document.getElementById('userInfo');
+        const userAvatar = document.getElementById('userAvatar');
+        const userName = document.getElementById('userName');
+        const currentUserName = document.getElementById('currentUserName');
+        const logoutBtn = document.getElementById('logoutBtn');
+
+        // Initialize authentication
+        function initAuth() {
+            // Check if user is already logged in
+            const savedUser = localStorage.getItem('plotLocatorCurrentUser');
+            if (savedUser) {
+                currentUser = JSON.parse(savedUser);
+                showAppInterface();
+            } else {
+                showAuthModal();
+            }
+
+            // Setup auth event listeners
+            setupAuthEventListeners();
+        }
+
+        function setupAuthEventListeners() {
+            // Auth form submission
+            authForm.addEventListener('submit', handleAuthSubmit);
+            
+            // Switch between login and signup
+            authSwitchButton.addEventListener('click', toggleAuthMode);
+            
+            // Logout button
+            logoutBtn.addEventListener('click', handleLogout);
+        }
+
+        function toggleAuthMode() {
+            isLoginMode = !isLoginMode;
+            
+            if (isLoginMode) {
+                authTitle.textContent = 'Login to Plot Locator';
+                authSubtitle.textContent = 'Access your account to continue';
+                authSubmitButton.textContent = 'Login';
+                authSwitchText.textContent = "Don't have an account?";
+                authSwitchButton.textContent = 'Sign up';
+                nameField.style.display = 'none';
+            } else {
+                authTitle.textContent = 'Create Account';
+                authSubtitle.textContent = 'Sign up to start using Plot Locator';
+                authSubmitButton.textContent = 'Sign up';
+                authSwitchText.textContent = "Already have an account?";
+                authSwitchButton.textContent = 'Login';
+                nameField.style.display = 'block';
+            }
+            
+            // Clear errors
+            clearAuthErrors();
+        }
+
+        function handleAuthSubmit(e) {
+            e.preventDefault();
+            clearAuthErrors();
+            
+            const email = authEmail.value.trim();
+            const password = authPassword.value.trim();
+            const name = authName.value.trim();
+            
+            // Validation
+            if (!isLoginMode && !name) {
+                showError(nameError, 'Name is required');
+                return;
+            }
+            
+            if (!email) {
+                showError(emailError, 'Email is required');
+                return;
+            }
+            
+            if (!isValidEmail(email)) {
+                showError(emailError, 'Please enter a valid email');
+                return;
+            }
+            
+            if (!password) {
+                showError(passwordError, 'Password is required');
+                return;
+            }
+            
+            if (password.length < 6) {
+                showError(passwordError, 'Password must be at least 6 characters');
+                return;
+            }
+            
+            // Process authentication
+            if (isLoginMode) {
+                loginUser(email, password);
+            } else {
+                registerUser(name, email, password);
+            }
+        }
+
+        function isValidEmail(email) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return emailRegex.test(email);
+        }
+
+        function showError(errorElement, message) {
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+        }
+
+        function clearAuthErrors() {
+            nameError.style.display = 'none';
+            emailError.style.display = 'none';
+            passwordError.style.display = 'none';
+        }
+
+        function registerUser(name, email, password) {
+            // Get existing users or initialize empty array
+            const users = JSON.parse(localStorage.getItem('plotLocatorUsers')) || [];
+            
+            // Check if user already exists
+            const existingUser = users.find(user => user.email === email);
+            if (existingUser) {
+                showError(emailError, 'User with this email already exists');
+                return;
+            }
+            
+            // Create new user
+            const newUser = {
+                id: generateUserId(),
+                name: name,
+                email: email,
+                password: password, // In a real app, this would be hashed
+                createdAt: new Date().toISOString()
+            };
+            
+            // Save user
+            users.push(newUser);
+            localStorage.setItem('plotLocatorUsers', JSON.stringify(users));
+            
+            // Auto login after registration
+            currentUser = newUser;
+            localStorage.setItem('plotLocatorCurrentUser', JSON.stringify(newUser));
+            
+            showAppInterface();
+            toast('Account created successfully!');
+        }
+
+        function loginUser(email, password) {
+            // Get users
+            const users = JSON.parse(localStorage.getItem('plotLocatorUsers')) || [];
+            
+            // Find user
+            const user = users.find(u => u.email === email && u.password === password);
+            
+            if (user) {
+                currentUser = user;
+                localStorage.setItem('plotLocatorCurrentUser', JSON.stringify(user));
+                showAppInterface();
+                toast('Login successful!');
+            } else {
+                showError(passwordError, 'Invalid email or password');
+            }
+        }
+
+        function generateUserId() {
+            return 'user_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+        }
+
+        function showAuthModal() {
+            authModalBackdrop.style.display = 'flex';
+            // Reset form
+            authForm.reset();
+            clearAuthErrors();
+        }
+
+        function hideAuthModal() {
+            authModalBackdrop.style.display = 'none';
+        }
+
+        function showAppInterface() {
+            hideAuthModal();
+            
+            // Update UI with user info
+            if (currentUser) {
+                userInfo.style.display = 'flex';
+                userName.textContent = currentUser.name;
+                currentUserName.textContent = currentUser.name;
+                
+                // Set avatar with first letter of name
+                userAvatar.textContent = currentUser.name.charAt(0).toUpperCase();
+            }
+            
+            // Initialize the rest of the app
+            initializeApp();
+        }
+
+        function handleLogout() {
+            currentUser = null;
+            localStorage.removeItem('plotLocatorCurrentUser');
+            
+            // Hide user info
+            userInfo.style.display = 'none';
+            
+            // Show auth modal
+            showAuthModal();
+            
+            toast('Logged out successfully');
+        }
+
+        // Language management
+        let currentLanguage = 'hi';
+        
+        const translations = {
+            hi: {
+                appTitle: "Plot Locator",
+                menu: "मेन्यू",
+                settings: "सेटिंग्स",
+                home: "होम",
+                language: "English",
+                languageTitle: "Switch to English",
+                sidebarTitle: "Plot Locator टूल्स",
+                dataLoadTitle: "डेटा लोड करें",
+                fileInputLabel: "GeoJSON फाइल चुनें",
+                dropText: "या GeoJSON फाइल यहाँ ड्रॉप करें",
+                plotSearch: "प्लॉट खोजें",
+                plotInput: "प्लॉट नंबर दर्ज करें",
+                examplePlot: "उदा: 2576 या 2576,2577",
+                maxPlot: "अधिकतम 5 प्लॉट एक साथ खोजें",
+                search: "खोज",
+                reset: "रीसेट",
+                voice: "आवाज",
+                displaySettings: "डिस्प्ले सेटिंग",
+                showPlots: "प्लॉट्स दिखाएं",
+                showLabels: "प्लॉट नंबर दिखाएं",
+                location: "लोकेशन",
+                myLocation: "मेरी लोकेशन",
+                showAll: "सभी दिखाएं",
+                manualMeasure: "मैनुअल माप टूल",
+                measure: "माप",
+                start: "शुरू",
+                undo: "पूर्ववत",
+                finish: "समाप्त",
+                clear: "साफ़",
+                unit: "माप इकाई",
+                help: "सहायता",
+                guide: "गाइड",
+                guideTitle: "उपयोग गाइड",
+                guideSubtitle: "Plot Locator गाइड",
+                guideSearch: "प्लॉट्स खोज:",
+                guideSearchDesc: "मेन्यू खोलकर नंबर डालें (उदा. 2576 या 2576,2577) और खोज दबाएँ।",
+                guideNumbers: "प्लॉट नंबर:",
+                guideNumbersDesc: "'प्लॉट नंबर दिखाएं' टॉगल से ज़ूम पर नंबर दिखेंगे (ज़ूम 16+)।",
+                guideLocation: "मेरी लोकेशन:",
+                guideLocationDesc: "लोकेशन बटन दबाकर अपनी स्थिति देखें。",
+                guideManual: "मैनुअल माप:",
+                guideManualDesc: "माप शुरू करें → नक्शे पर क्लिक करके बिंदु जोड़ें → समाप्त पर क्लिक करें。",
+                guideDataLoad: "डेटा लोड:",
+                guideDataLoadDesc: "GeoJSON फाइल अपलोड करें या उदाहरण डेटा लोड करें।",
+                guideNote: "नोट: आप GeoJSON फाइल अपलोड कर सकते हैं या उदाहरण डेटा का उपयोग कर सकते हैं।",
+                mapSettingsTitle: "मैप सेटिंग्स",
+                languageSettingsTitle: "भाषा सेटिंग",
+                settingsTitle: "सेटिंग्स",
+                saveSettingsTitle: "सेटिंग्स सहेजें",
+                saveSettings: "सेटिंग्स सहेजें",
+                userInfoTitle: "यूज़र जानकारी"
+            },
+            en: {
+                appTitle: "Plot Locator",
+                menu: "Menu",
+                settings: "Settings",
+                home: "Home",
+                language: "हिंदी",
+                languageTitle: "हिंदी में बदलें",
+                sidebarTitle: "Plot Locator Tools",
+                dataLoadTitle: "Load Data",
+                fileInputLabel: "Choose GeoJSON File",
+                dropText: "Or drop GeoJSON file here",
+                plotSearch: "Plot Search",
+                plotInput: "Enter plot number",
+                examplePlot: "e.g.: 2576 or 2576,2577",
+                maxPlot: "Maximum 5 plots at a time",
+                search: "Search",
+                reset: "Reset",
+                voice: "Voice",
+                displaySettings: "Display Settings",
+                showPlots: "Show Plots",
+                showLabels: "Show Plot Numbers",
+                location: "Location",
+                myLocation: "My Location",
+                showAll: "Show All",
+                manualMeasure: "Manual Measure Tool",
+                measure: "Measure",
+                start: "Start",
+                undo: "Undo",
+                finish: "Finish",
+                clear: "Clear",
+                unit: "Measurement Unit",
+                help: "Help",
+                guide: "Guide",
+                guideTitle: "User Guide",
+                guideSubtitle: "Plot Locator Guide",
+                guideSearch: "Plot Search:",
+                guideSearchDesc: "Open menu, enter numbers (e.g. 2576 or 2576,2577) and press search.",
+                guideNumbers: "Plot Numbers:",
+                guideNumbersDesc: "Plot numbers will be visible at zoom level 16+ with 'Show Plot Numbers' toggle.",
+                guideLocation: "My Location:",
+                guideLocationDesc: "Press location button to see your current position.",
+                guideManual: "Manual Measure:",
+                guideManualDesc: "Start measure → Click on map to add points → Click finish.",
+                guideDataLoad: "Data Load:",
+                guideDataLoadDesc: "Upload a GeoJSON file or load sample data.",
+                guideNote: "Note: You can upload a GeoJSON file or use sample data.",
+                mapSettingsTitle: "Map Settings",
+                languageSettingsTitle: "Language Settings",
+                settingsTitle: "Settings",
+                saveSettingsTitle: "Save Settings",
+                saveSettings: "Save Settings",
+                userInfoTitle: "User Info"
+            }
+        };
+
+        function setLanguage(lang) {
+            currentLanguage = lang;
+            const t = translations[lang];
+            document.getElementById('appTitleText').textContent = t.appTitle;
+            document.getElementById('menuBtn').querySelector('span').textContent = t.menu;
+            document.getElementById('menuBtn').title = t.menu;
+            document.getElementById('settingsBtn').querySelector('span').textContent = t.settings;
+            document.getElementById('settingsBtn').title = t.settings;
+            document.getElementById('homeBtn').title = t.home;
+            document.getElementById('languageBtn').querySelector('span').textContent = t.language;
+            document.getElementById('languageBtn').title = t.languageTitle;
+            document.getElementById('sidebarTitle').textContent = t.sidebarTitle;
+            document.getElementById('dataLoadTitle').textContent = t.dataLoadTitle;
+            document.getElementById('fileInputLabel').textContent = t.fileInputLabel;
+            document.getElementById('dropText').textContent = t.dropText;
+            document.getElementById('plotSearchTitle').textContent = t.plotSearch;
+            document.getElementById('plotInputLabel').textContent = t.plotInput;
+            document.getElementById('multiPlotInput').placeholder = t.examplePlot;
+            document.getElementById('maxPlotText').textContent = t.maxPlot;
+            document.getElementById('multiSearchBtn').querySelector('span').textContent = t.search;
+            document.getElementById('multiSearchBtn').title = t.search;
+            document.getElementById('resetSearchBtn').querySelector('span').textContent = t.reset;
+            document.getElementById('resetSearchBtn').title = t.reset;
+            document.getElementById('voiceBtn').querySelector('span').textContent = t.voice;
+            document.getElementById('voiceBtn').title = t.voice;
+            document.getElementById('displaySettingsTitle').textContent = t.displaySettings;
+            document.getElementById('showPlotsLabel').textContent = t.showPlots;
+            document.getElementById('showLabelsLabel').textContent = t.showLabels;
+            document.getElementById('locateBtn').title = t.myLocation;
+            document.getElementById('fitBtn').title = t.showAll;
+            document.getElementById('manualMeasureTitle').textContent = t.manualMeasure;
+            document.getElementById('measureToggleBtn').querySelector('span').textContent = t.measure;
+            document.getElementById('measureToggleBtn').title = t.measure;
+            document.getElementById('startMeasureBtn').querySelector('span').textContent = t.start;
+            document.getElementById('startMeasureBtn').title = t.start;
+            document.getElementById('undoMeasureBtn').querySelector('span').textContent = t.undo;
+            document.getElementById('undoMeasureBtn').title = t.undo;
+            document.getElementById('finishMeasureBtn').querySelector('span').textContent = t.finish;
+            document.getElementById('finishMeasureBtn').title = t.finish;
+            document.getElementById('clearMeasureBtn').querySelector('span').textContent = t.clear;
+            document.getElementById('clearMeasureBtn').title = t.clear;
+            document.getElementById('unitLabel').textContent = t.unit;
+            document.getElementById('helpTitle').textContent = t.help;
+            document.getElementById('userGuideBtn').querySelector('span').textContent = t.guide;
+            document.getElementById('userGuideBtn').title = t.guide;
+            document.getElementById('guideTitle').textContent = t.guideTitle;
+            document.getElementById('guideSubtitle').textContent = t.guideSubtitle;
+            document.getElementById('guideSearch').textContent = t.guideSearch;
+            document.getElementById('guideSearchDesc').textContent = t.guideSearchDesc;
+            document.getElementById('guideNumbers').textContent = t.guideNumbers;
+            document.getElementById('guideNumbersDesc').textContent = t.guideNumbersDesc;
+            document.getElementById('guideLocation').textContent = t.guideLocation;
+            document.getElementById('guideLocationDesc').textContent = t.guideLocationDesc;
+            document.getElementById('guideManual').textContent = t.guideManual;
+            document.getElementById('guideManualDesc').textContent = t.guideManualDesc;
+            document.getElementById('guideDataLoad').textContent = t.guideDataLoad;
+            document.getElementById('guideDataLoadDesc').textContent = t.guideDataLoadDesc;
+            document.getElementById('guideNote').textContent = t.guideNote;
+            document.getElementById('mapSettingsTitle').textContent = t.mapSettingsTitle;
+            document.getElementById('languageSettingsTitle').textContent = t.languageSettingsTitle;
+            document.getElementById('settingsTitle').textContent = t.settingsTitle;
+            document.getElementById('saveSettingsTitle').textContent = t.saveSettingsTitle;
+            document.getElementById('saveSettingsBtn').querySelector('span').textContent = t.saveSettings;
+            document.getElementById('saveSettingsBtn').title = t.saveSettings;
+            document.getElementById('userInfoTitle').textContent = t.userInfoTitle;
+        }
+
+// सभी बटनों पर active toggle
+document.querySelectorAll(".btn-3d").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.classList.contains("active")) {
+      btn.classList.remove("active");
+    } else {
+      document.querySelectorAll(".btn-3d").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+    }
+  });
+});
+
+        // Map initialization
+        const map = L.map('map', { zoomControl: false }).setView([25.339365, 85.765942], 16);
+        L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+        // Define base layers
+        let googleSatellite, esriSatellite, currentBaseLayer;
+        
+        // Initialize base layers
+        function initBaseLayers() {
+            googleSatellite = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                maxZoom: 22,
+                subdomains: ['mt0','mt1','mt2','mt3'],
+                attribution: ''
+            });
+            
+            esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 22,
+                attribution: ''
+            });
+            
+            // Set Google as default
+            googleSatellite.addTo(map);
+            currentBaseLayer = 'google';
+        }
+        
+        // Function to switch base layers
+        function switchBaseLayer(layerType) {
+            if (layerType === currentBaseLayer) return;
+            
+            // Remove current layer
+            map.removeLayer(googleSatellite);
+            map.removeLayer(esriSatellite);
+            
+            // Add new layer
+            if (layerType === 'google') {
+                googleSatellite.addTo(map);
+                currentBaseLayer = 'google';
+            } else if (layerType === 'esri') {
+                esriSatellite.addTo(map);
+                currentBaseLayer = 'esri';
+            }
+            
+            // Update UI
+            document.querySelectorAll('.map-type-btn-menu').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelector(`.map-type-btn-menu[data-map-type="${layerType}"]`).classList.add('active');
+            
+            toast(layerType === 'google' ? 'Google Satellite map selected' : 'Esri Satellite map selected');
+        }
+        
+        // Initialize base layers
+        initBaseLayers();
+
+        // Constants
+        const PLOT_PROP = 'Name';
+        const LABEL_BATCH_SIZE = 50;
+        const MIN_ZOOM_FOR_LABELS = 16;
+        const MAX_MULTI_SEARCH = 5;
+
+        // UI references
+        const sidebar = document.getElementById('sidebar');
+        const menuBtn = document.getElementById('menuBtn');
+        const closeSidebarBtn = document.getElementById('closeSidebarBtn');
+        const homeBtn = document.getElementById('homeBtn');
+        const languageBtn = document.getElementById('languageBtn');
+        const locationToggleBtn = document.getElementById('locationToggleBtn');
+        const multiSearchBtn = document.getElementById('multiSearchBtn');
+        const resetSearchBtn = document.getElementById('resetSearchBtn');
+        const voiceBtn = document.getElementById('voiceBtn');
+        const multiPlotInput = document.getElementById('multiPlotInput');
+        const togglePlotsBtn = document.getElementById('togglePlots');
+        const toggleLabelsBtn = document.getElementById('toggleLabels');
+        const locateBtn = document.getElementById('locateBtn');
+        const fitBtn = document.getElementById('fitBtn');
+        const measureToggleBtn = document.getElementById('measureToggleBtn');
+        const measurePanel = document.getElementById('measurePanel');
+        const startMeasureBtn = document.getElementById('startMeasureBtn');
+        const undoMeasureBtn = document.getElementById('undoMeasureBtn');
+        const finishMeasureBtn = document.getElementById('finishMeasureBtn');
+        const clearMeasureBtn = document.getElementById('clearMeasureBtn');
+        const measureInfo = document.getElementById('measureInfo');
+        const unitSelect = document.getElementById('unitSelect');
+        const userGuideBtn = document.getElementById('userGuideBtn');
+        const userGuidePanel = document.getElementById('userGuidePanel');
+        const closeGuideBtn = document.getElementById('closeGuideBtn');
+        const toastEl = document.getElementById('toast');
+        const toastMessage = document.getElementById('toastMessage');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        
+        // Settings panel references
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsPanel = document.getElementById('settingsPanel');
+        const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+        const saveSettingsBtn = document.getElementById('saveSettingsBtn'); // नया बटन
+        
+        // नए UI references जोड़े गए
+        const fileSelectBtn = document.getElementById('fileSelectBtn');
+        const geoJSONFileInput = document.getElementById('geoJSONFileInput');
+        const dropZone = document.getElementById('dropZone');
+        const geojsonResetBtn = document.getElementById('geojsonResetBtn');
+        
+        // Map type selector in settings
+        const mapTypeButtonsMenu = document.querySelectorAll('.map-type-btn-menu');
+
+        // Confirmation modal references
+        const confirmationModalBackdrop = document.getElementById('confirmationModalBackdrop');
+        const confirmYesBtn = document.getElementById('confirmYes');
+        const confirmNoBtn = document.getElementById('confirmNo');
+
+        function showLoading() {
+            loadingOverlay.style.display = 'flex';
+        }
+        
+        function hideLoading() {
+            loadingOverlay.style.display = 'none';
+        }
+
+        function toast(msg, ms = 2200) {
+            toastMessage.textContent = msg;
+            toastEl.classList.add('show');
+            clearTimeout(window._t);
+            window._t = setTimeout(() => toastEl.classList.remove('show'), ms);
+        }
+
+        // Settings panel functionality
+        settingsBtn.addEventListener('click', () => {
+            settingsPanel.classList.toggle('open');
+            sidebar.classList.remove('open');
+            userGuidePanel.style.transform = 'translateX(-120%)';
+            toast(settingsPanel.classList.contains('open') ? 'सेटिंग्स खुली' : 'सेटिंग्स बंद');
+        });
+
+        closeSettingsBtn.addEventListener('click', () => {
+            settingsPanel.classList.remove('open');
+            toast('सेटिंग्स बंद');
+        });
+
+        // Save Settings functionality
+        saveSettingsBtn.addEventListener('click', () => {
+            // Save current settings to localStorage
+            const settings = {
+                language: currentLanguage,
+                baseLayer: currentBaseLayer,
+                showPlots: togglePlotsBtn.checked,
+                showLabels: toggleLabelsBtn.checked
+            };
+            
+            localStorage.setItem('plotLocatorSettings', JSON.stringify(settings));
+            toast('सेटिंग्स सहेजी गईं! अब आपको बार-बार सेटिंग्स करने की ज़रूरत नहीं होगी।');
+        });
+
+        // Load settings on page load
+        function loadSettings() {
+            const savedSettings = localStorage.getItem('plotLocatorSettings');
+            if (savedSettings) {
+                try {
+                    const settings = JSON.parse(savedSettings);
+                    
+                    // Apply language setting
+                    if (settings.language && settings.language !== currentLanguage) {
+                        setLanguage(settings.language);
+                    }
+                    
+                    // Apply base layer setting
+                    if (settings.baseLayer && settings.baseLayer !== currentBaseLayer) {
+                        switchBaseLayer(settings.baseLayer);
+                    }
+                    
+                    // Apply display settings
+                    if (settings.hasOwnProperty('showPlots')) {
+                        togglePlotsBtn.checked = settings.showPlots;
+                        plotsVisible = settings.showPlots;
+                        if (plotsVisible) {
+                            map.addLayer(plotLayer);
+                        } else {
+                            map.removeLayer(plotLayer);
+                        }
+                    }
+                    
+                    if (settings.hasOwnProperty('showLabels')) {
+                        toggleLabelsBtn.checked = settings.showLabels;
+                        labelsVisible = settings.showLabels;
+                        if (labelsVisible && map.getZoom() >= MIN_ZOOM_FOR_LABELS) {
+                            if (!labelsBuilt) buildLabels();
+                            map.addLayer(labelLayer);
+                        } else {
+                            map.removeLayer(labelLayer);
+                        }
+                    }
+                    
+                    toast('पिछली सेटिंग्स लोड की गईं');
+                } catch (error) {
+                    console.error('सेटिंग्स लोड करने में त्रुटि:', error);
+                }
+            }
+        }
+
+        // Layers and state
+        let dataGeo = null;
+        const plotLayer = L.geoJSON(null, {
+            style: () => ({ color: '#f59e0b', weight: 2, fillOpacity: 0.15 }),
+            onEachFeature: (feature, layer) => {
+                layer.on('click', () => {
+                    const pno = feature?.properties?.[PLOT_PROP] ?? 'Unknown';
+                    const area_m2 = calculateArea(feature);
+                    layer.bindPopup(`<b>प्लॉट:</b> ${pno}<br>${formatAll(area_m2)}`).openPopup();
+                    toast(`प्लॉट ${pno} देखा गया`);
+                });
+            }
+        }).addTo(map);
+        const labelLayer = L.layerGroup();
+        let highlightLayer = null;
+        let labelsBuilt = false;
+        let plotsVisible = true, labelsVisible = false;
+
+        // Multiple GeoJSON support
+        let multipleGeoJSONs = [];
+
+        // Real-time location variables
+        let locationMarker = null, locationCircle = null;
+        let locationWatchId = null;
+        let isLocationActive = false;
+        let realTimeWatchId = null;
+        let realTimeLocationActive = false;
+
+        // Manual measurement
+        let measuring = false, pts = [], markers = [], preview = null, liveLabel = null, finalLabel = null;
+        let currentMeasurementPoly = null;
+
+        function createBlueCircleMarker(latlng) {
+            return L.marker(latlng, { 
+                icon: L.divIcon({ 
+                    html: `<div style="width:12px;height:12px;border-radius:50%;background:transparent;border:3px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.2);"></div>`, 
+                    className: '',
+                    iconSize: [12, 12], 
+                    iconAnchor: [6, 6] 
+                }), 
+                draggable: true 
+            });
+        }
+
+        // Finish measurement button - UPDATED WITH CONFIRMATION POPUP
+        finishMeasureBtn.addEventListener('click', () => {
+            if (pts.length < 3) return toast('क्षेत्रफल के लिए ≥ 3 बिंदु चाहिए');
+            measuring = false;
+            startMeasureBtn.innerHTML = '<i class="fas fa-play"></i><span>शुरू</span>';
+            startMeasureBtn.disabled = false; finishMeasureBtn.disabled = true; undoMeasureBtn.disabled = true;
+            try {
+                const poly = turf.polygon([[...pts, pts[0]]]);
+                currentMeasurementPoly = poly;
+                const area_m2 = turf.area(poly);
+                const c = turf.centroid(poly).geometry.coordinates;
+                if (finalLabel) map.removeLayer(finalLabel);
+                finalLabel = L.marker([c[1], c[0]], { icon: L.divIcon({ html: `<div style="background:white;padding:4px 8px;border-radius:var(--radius);border:1px solid #2563eb;">${formatSelected(area_m2, unitSelect)}</div>` }), interactive: false }).addTo(map);
+                
+                // Show confirmation popup instead of directly opening plot details
+                confirmationModalBackdrop.style.display = 'flex';
+                
+                toast(`क्षेत्रफल: ${formatSelected(area_m2, unitSelect)}`);
+            } catch (e) {
+                console.error('Finish measure error:', e);
+            }
+        });
+
+        // Confirmation modal handlers
+        confirmYesBtn.addEventListener('click', function() {
+            confirmationModalBackdrop.style.display = 'none';
+            // Open plot details modal
+            document.getElementById("plotInfoModalBackdrop").style.display = "flex";
+        });
+
+        confirmNoBtn.addEventListener('click', function() {
+            confirmationModalBackdrop.style.display = 'none';
+            toast('माप पूरा हुआ, रिपोर्ट नहीं बनाई जाएगी');
+        });
+
+        // GeoJSON डेटा लोड करने की फंक्शन
+        function loadGeoJSONData(geojson) {
+            showLoading();
+            
+            // पुराने डेटा साफ़ करें
+            plotLayer.clearLayers();
+            labelLayer.clearLayers();
+            if (highlightLayer) {
+                map.removeLayer(highlightLayer);
+                highlightLayer = null;
+            }
+            
+            dataGeo = geojson;
+            multipleGeoJSONs = [geojson];
+            
+            try {
+                plotLayer.addData(geojson);
+                if (plotLayer.getBounds().isValid()) {
+                    map.fitBounds(plotLayer.getBounds(), { padding: [30, 30] });
+                }
+                labelsBuilt = false;
+                
+                // लेबल्स रीसेट करें
+                if (labelsVisible && map.getZoom() >= MIN_ZOOM_FOR_LABELS) {
+                    buildLabels();
+                    map.addLayer(labelLayer);
+                }
+                
+                toast('प्लॉट्स लोड हुए');
+            } catch (error) {
+                console.error('GeoJSON load error:', error);
+                toast('GeoJSON प्रोसेस करने में त्रुटि');
+            } finally {
+                setTimeout(hideLoading, 500);
+            }
+        }
+
+        // Area calculation
+        function calculateArea(feature) {
+            try {
+                if (!feature) return 0;
+                return turf.area(feature);
+            } catch (e) {
+                console.error('Area calc error:', e);
+                return 0;
+            }
+        }
+
+        // Formatting functions
+        function formatAll(area_m2) {
+            const sqft = area_m2 * 10.7639104167;
+            const acre = sqft / 43560;
+            const dismil = acre * 100;
+            const kattha = acre * 32;
+            const bigha = kattha / 20;
+            const dhur = kattha * 20;
+            const dhurki = dhur * 20;
+            return `${area_m2.toFixed(2)} m²<br>${sqft.toFixed(1)} sq ft<br>${acre.toFixed(4)} acre<br>${dismil.toFixed(2)} dismil<br>${bigha.toFixed(2)} बीघा<br>${kattha.toFixed(2)} कट्ठा<br>${dhur.toFixed(2)} धुर<br>${dhurki.toFixed(2)} धुरकी`;
+        }
+
+        function formatSelected(area_m2, unitSelectElement) {
+            const unit = unitSelectElement ? unitSelectElement.value : 'sqm';
+            const sqft = area_m2 * 10.7639104167;
+            const acre = sqft / 43560;
+            const dismil = acre * 100;
+            const kattha = acre * 32;
+            const bigha = kattha / 20;
+            const dhur = kattha * 20;
+            const dhurki = dhur * 20;
+            switch (unit) {
+                case 'sqm': return `${area_m2.toFixed(2)} m²`;
+                case 'sqft': return `${sqft.toFixed(1)} sq ft`;
+                case 'acre': return `${acre.toFixed(4)} acre`;
+                case 'dismil': return `${dismil.toFixed(2)} dismil`;
+                case 'bigha': return `${bigha.toFixed(2)} बीघा`;
+                case 'kattha': return `${kattha.toFixed(2)} कट्ठा`;
+                case 'dhur': return `${dhur.toFixed(2)} धुर`;
+                case 'dhurki': return `${dhurki.toFixed(2)} धुरकी`;
+                default: return `${area_m2.toFixed(2)} m²`;
+            }
+        }
+
+        function formatLength(meters) {
+            if (meters >= 1000) return `${(meters / 1000).toFixed(3)} km`;
+            if (meters >= 1) return `${meters.toFixed(2)} m`;
+            return `${(meters * 100).toFixed(1)} cm`;
+        }
+
+        // UI interactions
+        menuBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('open');
+            settingsPanel.classList.remove('open');
+            userGuidePanel.style.transform = 'translateX(-120%)';
+            toast(sidebar.classList.contains('open') ? 'मेन्यू खुला' : 'मेन्यू बंद');
+        });
+        
+        closeSidebarBtn.addEventListener('click', () => {
+            sidebar.classList.remove('open');
+            toast('मेन्यू बंद');
+        });
+
+        homeBtn.addEventListener('click', () => {
+            stopLocationTracking();
+            stopRealTimeLocationTracking();
+            clearMeasure(true);
+            measuring = false;
+            measurePanel.style.display = 'none';
+            sidebar.classList.remove('open');
+            settingsPanel.classList.remove('open');
+            userGuidePanel.style.transform = 'translateX(-120%)';
+            if (plotLayer.getBounds().isValid()) map.fitBounds(plotLayer.getBounds(), { padding: [30, 30] });
+            toast('होम पर लौटें');
+        });
+
+        languageBtn.addEventListener('click', () => {
+            const newLang = currentLanguage === 'hi' ? 'en' : 'hi';
+            setLanguage(newLang);
+            toast(newLang === 'hi' ? 'भाषा हिंदी में बदली गई' : 'Language changed to English');
+        });
+
+        togglePlotsBtn.addEventListener('change', () => {
+            plotsVisible = togglePlotsBtn.checked;
+            if (plotsVisible) { map.addLayer(plotLayer); toast('प्लॉट्स चालू'); }
+            else { map.removeLayer(plotLayer); toast('प्लॉट्स बंद'); }
+        });
+
+        toggleLabelsBtn.addEventListener('change', () => {
+            labelsVisible = toggleLabelsBtn.checked;
+            if (labelsVisible) {
+                if (!labelsBuilt && map.getZoom() >= MIN_ZOOM_FOR_LABELS) buildLabels();
+                if (map.getZoom() >= MIN_ZOOM_FOR_LABELS) map.addLayer(labelLayer);
+                else toast('प्लॉट नंबर देखने के लिए ज़ूम करें');
+            } else {
+                map.removeLayer(labelLayer);
+                toast('प्लॉट नंबर बंद');
+            }
+        });
+
+        multiSearchBtn.addEventListener('click', () => {
+            const queries = multiPlotInput.value.trim().toLowerCase().split(',').map(q => q.trim()).filter(q => q);
+            if (!queries.length) return toast('प्लॉट नंबर डालें (उदा. 2576 या 2576,2577)');
+            if (queries.length > MAX_MULTI_SEARCH) return toast(`अधिकतम ${MAX_MULTI_SEARCH} प्लॉट्स खोजें`);
+            if (multipleGeoJSONs.length === 0) return toast('प्लॉट्स लोड नहीं हुए');
+            const found = [];
+            const bounds = L.latLngBounds();
+            if (highlightLayer) { map.removeLayer(highlightLayer); highlightLayer = null; }
+            highlightLayer = L.geoJSON(null, { style: { color: '#ef4444', weight: 3, fillOpacity: 0.3 } }).addTo(map);
+            
+            // Search through all loaded GeoJSONs
+            multipleGeoJSONs.forEach(geojson => {
+                const features = geojson.features || [];
+                queries.forEach(q => {
+                    const feat = features.find(f => {
+                        const p = f.properties || {};
+                        return [PLOT_PROP, 'plot_no', 'PlotNumber', 'name', 'NAME', 'Plot_No'].some(k => p[k] && String(p[k]).toLowerCase() === q);
+                    });
+                    if (feat) {
+                        found.push(feat);
+                        highlightLayer.addData(feat);
+                        bounds.extend(L.geoJSON(feat).getBounds());
+                    }
+                });
+            });
+            
+            if (!found.length) return toast('कोई प्लॉट नहीं मिला');
+            const popupContent = found.map(f => {
+                const pno = f.properties[PLOT_PROP] ?? 'Unknown';
+                const area_m2 = calculateArea(f);
+                const c = turf.centroid(f).geometry.coordinates;
+                return `<b>प्लॉट:</b> ${pno}<br>${formatAll(area_m2)}<br><a href="https://www.google.com/maps?q=${c[1]},${c[0]}" target="_blank">Google Maps में खोलें</a>`;
+            }).join('<hr>');
+            if (bounds.isValid()) map.fitBounds(bounds, { padding: [20, 20] });
+            const center = bounds.getCenter();
+            L.popup().setLatLng(center).setContent(popupContent).openOn(map);
+            toast(`प्लॉट्स मिले: ${found.length}`);
+        });
+
+        resetSearchBtn.addEventListener('click', () => {
+            multiPlotInput.value = '';
+            if (highlightLayer) { map.removeLayer(highlightLayer); highlightLayer = null; }
+            if (plotLayer.getBounds().isValid()) map.fitBounds(plotLayer.getBounds(), { padding: [30, 30] });
+            map.closePopup();
+            toast('खोज रीसेट की गई');
+        });
+
+        // Voice Search
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            const recognition = new SpeechRecognition();
+            recognition.lang = "hi-IN";
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            voiceBtn.addEventListener("click", () => {
+                toast("🎤 बोलना शुरू करें...");
+                try { recognition.start(); }
+                catch (e) { console.warn('Recognition start error', e); }
+            });
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript.trim();
+                multiPlotInput.value = transcript;
+                toast(`🔍 खोजा गया: ${transcript}`);
+                multiSearchBtn.click();
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech error', event);
+                toast("वॉयस त्रुटि: " + (event.error || 'error'));
+            };
+
+            recognition.onend = () => {
+                toast("🎤 वॉयस सर्च बंद");
+            };
+        } else {
+            voiceBtn.addEventListener("click", () => toast("आपके ब्राउज़र में वॉयस सर्च सपोर्ट नहीं है"));
+        }
+
+        fitBtn.addEventListener('click', () => {
+            if (plotLayer.getBounds().isValid()) map.fitBounds(plotLayer.getBounds(), { padding: [30, 30] });
+            else toast('कोई वैध प्लॉट सीमा नहीं');
+        });
+
+        // Location tracking functions
+        function removeLocationMarkers() {
+            if (locationMarker) {
+                map.removeLayer(locationMarker);
+                locationMarker = null;
+            }
+            if (locationCircle) {
+                map.removeLayer(locationCircle);
+                locationCircle = null;
+            }
+        }
+
+        function stopLocationTracking() {
+            if (locationWatchId !== null) {
+                navigator.geolocation.clearWatch(locationWatchId);
+                locationWatchId = null;
+            }
+            removeLocationMarkers();
+            locateBtn.innerHTML = '<i class="fas fa-location-crosshairs"></i>';
+            locateBtn.classList.remove('loading');
+            isLocationActive = false;
+        }
+
+        function stopRealTimeLocationTracking() {
+            if (realTimeWatchId !== null) {
+                navigator.geolocation.clearWatch(realTimeWatchId);
+                realTimeWatchId = null;
+            }
+            removeLocationMarkers();
+            locationToggleBtn.classList.remove('active');
+            realTimeLocationActive = false;
+        }
+
+        function showLocationError(error) {
+            let errorMessage = 'लोकेशन प्राप्त करने में असमर्थ';
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    errorMessage = 'लोकेशन अनुमति अस्वीकृत। सेटिंग में जाकर अनुमति दें।';
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    errorMessage = 'लोकेशन जानकारी उपलब्ध नहीं है।';
+                    break;
+                case error.TIMEOUT:
+                    errorMessage = 'लोकेशन अनुरोध का समय समाप्त हो गया।';
+                    break;
+                default:
+                    errorMessage = 'अज्ञात त्रुटि हुई।';
+                    break;
+            }
+            toast(errorMessage);
+            locateBtn.innerHTML = '<i class="fas fa-location-crosshairs"></i>';
+            locateBtn.classList.remove('loading');
+            isLocationActive = false;
+        }
+
+        function updateLocationUI(position) {
+            const { latitude, longitude, accuracy } = position.coords;
+            removeLocationMarkers();
+            
+            locationMarker = L.marker([latitude, longitude], {
+                icon: L.divIcon({
+                    html: `<div class="pulse-marker" style="width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid #fff;"></div>`,
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8]
+                })
+            }).addTo(map);
+            locationCircle = L.circle([latitude, longitude], { radius: accuracy }).addTo(map);
+            
+            let foundPlot = null;
+            plotLayer.eachLayer(function (layer) {
+                if (layer.feature && layer.feature.geometry) {
+                    const inside = turf.booleanPointInPolygon(
+                        turf.point([longitude, latitude]),
+                        layer.feature
+                    );
+                    if (inside) {
+                        foundPlot = layer.feature.properties.Name || "अज्ञात";
+                    }
+                }
+            });
+            
+            if (foundPlot) {
+                locationMarker.bindPopup(`<b>आपकी लोकेशन</b><br>प्लॉट: ${foundPlot}`).openPopup();
+                toast(`✅ आप इस plot पर हैं: ${foundPlot}`);
+            } else {
+                locationMarker.bindPopup(`<b>आपकी लोकेशन</b><br>⚠️ कोई plot नहीं मिला`).openPopup();
+                toast("⚠️ कोई plot नहीं मिला");
+            }
+            
+            map.setView([latitude, longitude], 18);
+            toast('आपकी लोकेशन दिखाई जा रही है');
+        }
+
+        // Locate Button
+        let locateBtnActive = false;
+        locateBtn.addEventListener("click", () => {
+            if (locateBtnActive) {
+                stopLocationTracking();
+                locateBtnActive = false;
+                toast('लोकेशन बंद');
+                return;
+            }
+            
+            // Stop real-time tracking if active
+            if (realTimeLocationActive) {
+                stopRealTimeLocationTracking();
+            }
+            
+            if (!navigator.geolocation) {
+                toast("आपका ब्राउज़र लोकेशन सपोर्ट नहीं करता");
+                return;
+            }
+            
+            locateBtn.classList.add('loading');
+            locateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            
+            locateBtnActive = true;
+            isLocationActive = true;
+            
+            locationWatchId = navigator.geolocation.watchPosition(
+                (position) => {
+                    updateLocationUI(position);
+                    locateBtn.innerHTML = '<i class="fas fa-location-crosshairs"></i>';
+                    locateBtn.classList.remove('loading');
+                },
+                (error) => {
+                    showLocationError(error);
+                    locateBtnActive = false;
+                },
+                { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+            );
+        });
+
+        // Real-time Location Toggle Button
+        locationToggleBtn.addEventListener('click', () => {
+            if (realTimeLocationActive) {
+                stopRealTimeLocationTracking();
+                toast('रियल-टाइम लोकेशन बंद');
+                return;
+            }
+            
+            // Stop one-time location if active
+            if (locateBtnActive) {
+                stopLocationTracking();
+                locateBtnActive = false;
+            }
+            
+            if (!navigator.geolocation) {
+                toast("आपका ब्राउज़र लोकेशन सपोर्ट नहीं करता");
+                return;
+            }
+            
+            locationToggleBtn.classList.add('active');
+            toast('रियल-टाइम लोकेशन चालू');
+            realTimeLocationActive = true;
+            
+            realTimeWatchId = navigator.geolocation.watchPosition(
+                (position) => {
+                    updateLocationUI(position);
+                },
+                (error) => {
+                    showLocationError(error);
+                    locationToggleBtn.classList.remove('active');
+                    realTimeLocationActive = false;
+                },
+                { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+            );
+        });
+
+        measureToggleBtn.addEventListener('click', () => {
+            measurePanel.style.display = measurePanel.style.display === 'none' ? 'block' : 'none';
+            if (measurePanel.style.display === 'none') {
+                clearMeasure(true); measuring = false;
+                startMeasureBtn.innerHTML = '<i class="fas fa-play"></i><span>शुरू</span>';
+                startMeasureBtn.disabled = false; undoMeasureBtn.disabled = true; finishMeasureBtn.disabled = true;
+            }
+            toast(measurePanel.style.display === 'block' ? 'मैनुअल माप टूल खुला' : 'मैनुअल माप टूल बंद');
+        });
+
+        map.on('click', (e) => {
+            if (measuring) {
+                const marker = createBlueCircleMarker(e.latlng).addTo(map);
+                markers.push(marker);
+                pts.push([e.latlng.lng, e.latlng.lat]);
+                undoMeasureBtn.disabled = false;
+                finishMeasureBtn.disabled = pts.length < 3;
+                marker.on('drag', (ev) => {
+                    try {
+                        const idx = markers.indexOf(marker);
+                        const p = ev.target.getLatLng();
+                        if (idx >= 0) { pts[idx] = [p.lng, p.lat]; updatePreview(); }
+                    } catch (ee) { console.error('Drag error:', ee); toast('बिंदु खींचने में त्रुटि'); }
+                });
+                updatePreview();
+                toast(`बिंदु जोड़ा: ${pts.length}`);
+            }
+            if (sidebar.classList.contains('open') && !measuring) {
+                sidebar.classList.remove('open');
+                userGuidePanel.style.transform = 'translateX(-120%)';
+                toast('मेन्यू बंद');
+            }
+        });
+
+        startMeasureBtn.addEventListener('click', () => {
+            measuring = !measuring;
+            startMeasureBtn.innerHTML = measuring ? '<i class="fas fa-pause"></i><span>रोकें</span>' : '<i class="fas fa-play"></i><span>शुरू</span>';
+            startMeasureBtn.disabled = false;
+            finishMeasureBtn.disabled = pts.length < 3;
+            toast(measuring ? 'मैनुअल माप शुरू' : 'मैनुअल माप रुका');
+        });
+
+        undoMeasureBtn.addEventListener('click', () => {
+            if (markers.length === 0) return;
+            const m = markers.pop(); if (m) map.removeLayer(m);
+            pts.pop();
+            undoMeasureBtn.disabled = markers.length === 0;
+            finishMeasureBtn.disabled = pts.length < 3;
+            updatePreview();
+            toast('पिछला बिंदु हटाया');
+        });
+
+        clearMeasureBtn.addEventListener('click', () => {
+            clearMeasure(true);
+            measuring = false;
+            startMeasureBtn.innerHTML = '<i class="fas fa-play"></i><span>शुरू</span>';
+            startMeasureBtn.disabled = false; finishMeasureBtn.disabled = true; undoMeasureBtn.disabled = true;
+            measureInfo.textContent = 'बिंदु: 0';
+            toast('मैनुअल माप साफ़ किया');
+        });
+
+        function clearMeasure(full = true) {
+            pts = [];
+            markers.forEach(m => map.removeLayer(m)); markers = [];
+            if (preview) { map.removeLayer(preview); preview = null; }
+            if (liveLabel) { map.removeLayer(liveLabel); liveLabel = null; }
+            if (full && finalLabel) { map.removeLayer(finalLabel); finalLabel = null; }
+            currentMeasurementPoly = null;
+        }
+
+        function updatePreview() {
+            if (preview) { map.removeLayer(preview); preview = null; }
+            if (liveLabel) { map.removeLayer(liveLabel); liveLabel = null; }
+            if (pts.length < 1) {
+                measureInfo.textContent = `बिंदु: ${pts.length}`;
+                return;
+            }
+            const latlngs = pts.map(p => [p[1], p[0]]);
+            try {
+                if (pts.length >= 3) {
+                    preview = L.polygon(latlngs, { color: '#2563eb', weight: 2, opacity: 1, fillOpacity: 0.1 }).addTo(map);
+                    const poly = turf.polygon([[...pts, pts[0]]]);
+                    const area_m2 = turf.area(poly);
+                    const perimeter_m = turf.length(turf.lineString([...pts, pts[0]]), { units: 'kilometers' }) * 1000;
+                    measureInfo.textContent = `बिंदु: ${pts.length} • क्षेत्र: ${formatSelected(area_m2, unitSelect)} • परिधि: ${formatLength(perimeter_m)}`;
+                    const c = turf.centroid(poly).geometry.coordinates;
+                    liveLabel = L.marker([c[1], c[0]], { icon: L.divIcon({ html: `<div style="background:white;padding:4px 8px;border-radius:var(--radius);border:1px solid #2563eb;">${formatSelected(area_m2, unitSelect)}</div>` }), interactive: false }).addTo(map);
+                } else if (pts.length >= 1) {
+                    preview = L.polyline(latlngs, { color: '#2563eb', weight: 2 }).addTo(map);
+                    const line = turf.lineString(pts);
+                    const meters = turf.length(line, { units: 'kilometers' }) * 1000;
+                    measureInfo.textContent = `रेखा: ${formatLength(meters)} • बिंदु: ${pts.length}`;
+                    const mid = latlngs[Math.floor(latlngs.length / 2)];
+                    liveLabel = L.marker(mid, { icon: L.divIcon({ html: `<div style="background:white;padding:4px 8px;border-radius:var(--radius);border:1px solid #2563eb;">${formatLength(meters)}</div>` }), interactive: false }).addTo(map);
+                }
+            } catch (e) {
+                console.warn('Preview update error:', e);
+                toast('माप में त्रुटि, कृपया बिंदु जांचें');
+            }
+        }
+
+        unitSelect.addEventListener('change', () => {
+            if (pts.length >= 3) {
+                try {
+                    const poly = turf.polygon([[...pts, pts[0]]]);
+                    const area_m2 = turf.area(poly);
+                    const perimeter_m = turf.length(turf.lineString([...pts, pts[0]]), { units: 'kilometers' }) * 1000;
+                    if (liveLabel) { map.removeLayer(liveLabel); liveLabel = null; }
+                    const c = turf.centroid(poly).geometry.coordinates;
+                    liveLabel = L.marker([c[1], c[0]], { icon: L.divIcon({ html: `<div style="background:white;padding:4px 8px;border-radius:var(--radius);border:1px solid #2563eb;">${formatSelected(area_m2, unitSelect)}</div>` }), interactive: false }).addTo(map);
+                    measureInfo.textContent = `बिंदु: ${pts.length} • क्षेत्र: ${formatSelected(area_m2, unitSelect)} • परिधि: ${formatLength(perimeter_m)}`;
+                } catch (e) { console.warn('Unit change error:', e); toast('इकाई बदलने में त्रुटि'); }
+            } else if (pts.length >= 1) updatePreview();
+        });
+
+        // Label building - Optimized to prevent lag
+        function buildLabels() {
+            if (multipleGeoJSONs.length === 0 || labelsBuilt || map.getZoom() < MIN_ZOOM_FOR_LABELS) return;
+            
+            // Show loading indicator
+            showLoading();
+            
+            labelLayer.clearLayers();
+            let processed = 0;
+            
+            // Process all GeoJSONs in the multipleGeoJSONs array
+            multipleGeoJSONs.forEach(geojson => {
+                const features = geojson.features || [];
+                let batchProcessed = 0;
+                
+                function processBatch(startIdx) {
+                    const endIdx = Math.min(startIdx + LABEL_BATCH_SIZE, features.length);
+                    for (let i = startIdx; i < endIdx; i++) {
+                        try {
+                            const f = features[i];
+                            const name = f?.properties?.[PLOT_PROP] ?? 'Unknown';
+                            if (!name || name === 'Unknown') continue;
+                            const c = turf.centroid(f).geometry.coordinates;
+                            labelLayer.addLayer(L.marker([c[1], c[0]], {
+                                icon: L.divIcon({
+                                    className: 'plot-label',
+                                    html: `<div style="color: #000; font-weight: bold; text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff; font-size: 12px;">${name}</div>`,
+                                    iconSize: [30, 30],
+                                    iconAnchor: [15, 15]
+                                }),
+                                interactive: false
+                            }));
+                            processed++;
+                            batchProcessed++;
+                        } catch (e) { console.warn('Label error:', e); }
+                    }
+                    if (endIdx < features.length) {
+                        // Use setTimeout to allow UI updates between batches
+                        setTimeout(() => processBatch(endIdx), 50);
+                    } else { 
+                        labelsBuilt = true; 
+                        if (batchProcessed > 0) {
+                            toast(`प्लॉट नंबर बनाए गए: ${processed} प्लॉट्स`);
+                        }
+                        // Hide loading indicator
+                        hideLoading();
+                    }
+                }
+                processBatch(0);
+            });
+        }
+
+        map.on('zoomend', () => {
+            if (labelsVisible && !labelsBuilt && map.getZoom() >= MIN_ZOOM_FOR_LABELS) buildLabels();
+            if (labelsVisible && map.getZoom() < MIN_ZOOM_FOR_LABELS) map.removeLayer(labelLayer);
+            else if (labelsVisible && map.getZoom() >= MIN_ZOOM_FOR_LABELS && labelsBuilt) map.addLayer(labelLayer);
+        });
+
+        userGuideBtn.addEventListener('click', () => {
+            userGuidePanel.style.transform = userGuidePanel.style.transform === 'translateX(0px)' ? 'translateX(-120%)' : 'translateX(0)';
+            sidebar.classList.remove('open');
+            settingsPanel.classList.remove('open');
+            toast(userGuidePanel.style.transform === 'translateX(0px)' ? 'गाइड खुला' : 'गाइड बंद');
+        });
+        closeGuideBtn.addEventListener('click', () => { 
+            userGuidePanel.style.transform = 'translateX(-120%)'; 
+            toast('गाइड बंद'); 
+        });
+
+        // फाइल अपलोड इवेंट हैंडलर्स
+        fileSelectBtn.addEventListener('click', () => {
+            geoJSONFileInput.click();
+        });
+
+        // Multiple GeoJSON file input handler
+        geoJSONFileInput.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length > 0) {
+                files.forEach(file => {
+                    readGeoJSONFile(file);
+                });
+            }
+            geoJSONFileInput.value = ''; // Reset input
+        });
+
+        // ड्रैग और ड्रॉप इवेंट हैंडलर्स
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files);
+            if (files.length > 0) {
+                files.forEach(file => {
+                    if (file.name.endsWith('.geojson') || file.name.endsWith('.json')) {
+                        readGeoJSONFile(file);
+                    } else {
+                        toast('कृपया केवल GeoJSON फाइल अपलोड करें');
+                    }
+                });
+            }
+        });
+
+        // GeoJSON फाइल पढ़ने की फंक्शन
+        function readGeoJSONFile(file) {
+            showLoading();
+            const reader = new FileReader();
+            
+            reader.onload = (e) => {
+                try {
+                    const geojson = JSON.parse(e.target.result);
+                    multipleGeoJSONs.push(geojson);
+                    plotLayer.addData(geojson);
+                    if (plotLayer.getBounds().isValid()) {
+                        map.fitBounds(plotLayer.getBounds(), { padding: [30, 30] });
+                    }
+                    labelsBuilt = false;
+                    if (labelsVisible && map.getZoom() >= MIN_ZOOM_FOR_LABELS) {
+                        buildLabels();
+                        map.addLayer(labelLayer);
+                    }
+                    toast('GeoJSON फाइल लोड की गई');
+                } catch (error) {
+                    console.error('GeoJSON parse error:', error);
+                    toast('अमान्य GeoJSON फाइल');
+                } finally {
+                    hideLoading();
+                }
+            };
+            
+            reader.onerror = () => {
+                toast('फाइल पढ़ने में त्रुटि');
+                hideLoading();
+            };
+            
+            reader.readAsText(file);
+        }
+
+        // GeoJSON reset button handler
+        geojsonResetBtn.addEventListener('click', () => {
+            plotLayer.clearLayers();
+            labelLayer.clearLayers();
+            multipleGeoJSONs = [];
+            labelsBuilt = false;
+            toast('✅ सभी GeoJSON डेटा हटाए गए');
+        });
+
+        // Map type selector event listeners
+        mapTypeButtonsMenu.forEach(button => {
+            button.addEventListener('click', () => {
+                const mapType = button.getAttribute('data-map-type');
+                switchBaseLayer(mapType);
+            });
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!sidebar.contains(e.target) && !menuBtn.contains(e.target) && 
+                !settingsPanel.contains(e.target) && !settingsBtn.contains(e.target) && 
+                !userGuidePanel.contains(e.target) && !userGuideBtn.contains(e.target) && !measuring) {
+                
+                if (sidebar.classList.contains('open')) { 
+                    sidebar.classList.remove('open'); 
+                    toast('मेन्यू बंद'); 
+                }
+                if (settingsPanel.classList.contains('open')) { 
+                    settingsPanel.classList.remove('open'); 
+                    toast('सेटिंग्स बंद'); 
+                }
+                if (userGuidePanel.style.transform === 'translateX(0px)') { 
+                    userGuidePanel.style.transform = 'translateX(-120%)'; 
+                    toast('गाइड बंद'); 
+                }
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { 
+                sidebar.classList.remove('open'); 
+                settingsPanel.classList.remove('open');
+                userGuidePanel.style.transform = 'translateX(-120%)'; 
+                toast('बंद किया गया'); 
+            }
+        });
+
+        Array.from(document.querySelectorAll('.sidebar .btn-3d')).forEach(btn => {
+            if (!btn.title) {
+                const txt = btn.querySelector('span')?.textContent?.trim();
+                if (txt) btn.title = txt;
+            }
+        });
+
+        // Offline detection
+        window.addEventListener('online', () => {
+            document.getElementById('offlineIndicator').style.display = 'none';
+            toast('इंटरनेट कनेक्शन पुनर्स्थापित');
+        });
+
+        window.addEventListener('offline', () => {
+            document.getElementById('offlineIndicator').style.display = 'flex';
+            toast('ऑफ़लाइन मोड: कुछ सुविधाएँ सीमित हो सकती हैं');
+        });
+
+        // Initialize the application
+        function initializeApp() {
+            setLanguage('hi');
+            
+            // Load saved settings
+            loadSettings();
+            
+            // Check initial online status
+            if (!navigator.onLine) {
+                document.getElementById('offlineIndicator').style.display = 'flex';
+                toast('ऑफ़लाइन मोड: कुछ सुविधाएँ सीमित हो सकती हैं');
+            }
+        }
+
+        // Start the authentication system
+        initAuth();
+    </script>
+
+    <!-- REPORT MODAL & GENERATION -->
+    <script>
+        // QR Code Generation Function
+        function generateQRCode(feature) {
+            const canvas = document.getElementById('qrCodeCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Clear previous QR code
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Create QR code data
+            const plotData = {
+                plotNumber: feature.properties.Name || "N/A",
+                accountNumber: feature.properties.Account || "N/A",
+                owner: feature.properties.Owner || "N/A",
+                village: feature.properties.Village || "N/A",
+                district: feature.properties.District || "N/A",
+                area: formatSelected(turf.area(feature), document.getElementById('unitSelect')),
+                timestamp: new Date().toISOString(),
+                verification: "PlotLocator Digital Report",
+                verifiedBy: currentUser ? currentUser.name : "User"
+            };
+            
+            const qrData = JSON.stringify(plotData);
+            
+            try {
+                // Use qrcode-generator library
+                const typeNumber = 0; // Auto detect
+                const errorCorrectionLevel = 'L';
+                const qr = qrcode(typeNumber, errorCorrectionLevel);
+                qr.addData(qrData);
+                qr.make();
+                
+                const cellSize = 4;
+                const margin = 1;
+                const size = qr.getModuleCount() * cellSize + margin * 2;
+                
+                // Draw QR code
+                for (let row = 0; row < qr.getModuleCount(); row++) {
+                    for (let col = 0; col < qr.getModuleCount(); col++) {
+                        ctx.fillStyle = qr.isDark(row, col) ? '#000000' : '#FFFFFF';
+                        ctx.fillRect(
+                            margin + col * cellSize,
+                            margin + row * cellSize,
+                            cellSize,
+                            cellSize
+                        );
+                    }
+                }
+            } catch (error) {
+                console.error('QR Code generation error:', error);
+                // Fallback: Draw a simple placeholder
+                ctx.fillStyle = '#f0f0f0';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#000';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('QR Code Error', canvas.width/2, canvas.height/2);
+            }
+        }
+
+        // New report generation functions
+        function drawBoundaryCanvas(feature){
+            const canvas = document.getElementById("reportCanvas");
+            const ctx = canvas.getContext("2d");
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = "#e11d48";
+            ctx.lineWidth = 2;
+
+            const coords = feature.geometry.coordinates[0];
+            const lons = coords.map(c => c[0]);
+            const lats = coords.map(c => c[1]);
+            const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+            const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+
+            const pad = 20;
+            const scaleX = (canvas.width - 2 * pad) / (maxLon - minLon);
+            const scaleY = (canvas.height - 2 * pad) / (maxLat - minLat);
+            const scale = Math.min(scaleX, scaleY);
+
+            ctx.beginPath();
+            coords.forEach(([lon, lat], i) => {
+                const x = pad + (lon - minLon) * scale;
+                const y = canvas.height - pad - (lat - minLat) * scale;
+                if (i == 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.closePath();
+            ctx.stroke();
+
+            // Draw area in the center of the polygon
+            const area_m2 = turf.area(feature);
+            const areaText = formatSelected(area_m2, document.getElementById('unitSelect'));
+            
+            // Calculate center of polygon
+            const center = turf.center(feature);
+            const centerX = pad + (center.geometry.coordinates[0] - minLon) * scale;
+            const centerY = canvas.height - pad - (center.geometry.coordinates[1] - minLat) * scale;
+            
+            // Draw background for text
+            ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+            ctx.fillRect(centerX - 60, centerY - 10, 120, 20);
+            
+            // Draw area text
+            ctx.fillStyle = "#000";
+            ctx.font = "bold 14px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText(areaText, centerX, centerY + 5);
+
+            // Reset text alignment
+            ctx.textAlign = "left";
+            
+            // Draw side lengths
+            ctx.fillStyle = "#000";
+            ctx.font = "10px Arial";
+            for(let i = 0; i < coords.length - 1; i++){
+                const start = coords[i], end = coords[i + 1];
+                const mid = turf.midpoint(turf.point(start), turf.point(end));
+                const lenFeet = turf.length(turf.lineString([start, end]), {units: "feet"});
+                const mx = pad + (mid.geometry.coordinates[0] - minLon) * scale;
+                const my = canvas.height - pad - (mid.geometry.coordinates[1] - minLat) * scale;
+                ctx.fillText(`${lenFeet.toFixed(1)} ft`, mx, my);
+            }
+        }
+
+        function openReport(data){
+            document.getElementById('reportAccount').innerText = data.feature.properties.Account || "N/A";
+            document.getElementById('reportPlot').innerText = data.feature.properties.Name || "N/A";
+            document.getElementById('reportThana').innerText = data.feature.properties.Thana || "N/A";
+            document.getElementById('reportOwner').innerText = data.feature.properties.Owner || "N/A";
+            document.getElementById('reportVillage').innerText = data.feature.properties.Village || "N/A";
+            document.getElementById('reportBlock').innerText = data.feature.properties.Block || "N/A";
+            document.getElementById('reportDistrict').innerText = data.feature.properties.District || "N/A";
+            
+            // Use current user's name instead of officer name
+            document.getElementById('officerName').innerText = currentUser ? currentUser.name : "User";
+            
+            document.getElementById('descriptionText').innerText = data.feature.properties.Description || "N/A";
+
+            const area_m2 = turf.area(data.feature);
+            document.getElementById('reportArea').innerText = formatSelected(area_m2, document.getElementById('unitSelect'));
+
+            document.getElementById('reportDateTime').innerText = new Date().toLocaleString('en-IN', {timeZone: 'Asia/Kolkata'});
+            document.getElementById('reportModalBackdrop').style.display = 'flex';
+
+            drawBoundaryCanvas(data.feature);
+            
+            // Generate QR Code - NEW
+            generateQRCode(data.feature);
+        }
+
+        // नया फंक्शन: सीधे रिपोर्ट डाउनलोड करें
+        function downloadReportDirectly(feature) {
+            // Create a temporary report container
+            const hiddenContainer = document.getElementById('hiddenReportContainer');
+            hiddenContainer.innerHTML = '';
+            
+            // Create a clone of the report modal
+            const reportClone = document.getElementById('reportModal').cloneNode(true);
+            reportClone.style.visibility = 'visible';
+            reportClone.style.position = 'absolute';
+            reportClone.style.left = '0';
+            reportClone.style.top = '0';
+            reportClone.style.width = '210mm';
+            reportClone.style.height = '297mm';
+            reportClone.style.zIndex = '99999';
+            
+            // Prepare the report data in the clone
+            prepareReportInElement(reportClone, feature);
+            
+            // Add the clone to the hidden container
+            hiddenContainer.appendChild(reportClone);
+            
+            // Use html2canvas to capture the report
+            setTimeout(() => {
+                html2canvas(reportClone, {
+                    scale: 2,
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: "#ffffff",
+                    scrollX: 0,
+                    scrollY: 0,
+                    width: reportClone.scrollWidth,
+                    height: reportClone.scrollHeight
+                }).then(canvas => {
+                    // Convert canvas to image and download
+                    const link = document.createElement("a");
+                    const plotName = feature.properties.Name || 'unknown';
+                    link.download = `plot_report_${plotName}.jpg`;
+                    link.href = canvas.toDataURL("image/jpeg", 0.9);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    
+                    // Clean up
+                    hiddenContainer.innerHTML = '';
+                    
+                    // Show success message
+                    toast('रिपोर्ट डाउनलोड हो गई!');
+                    
+                    // Close the plot info modal
+                    document.getElementById("plotInfoModalBackdrop").style.display = "none";
+                }).catch(error => {
+                    console.error('रिपोर्ट डाउनलोड में त्रुटि:', error);
+                    toast('रिपोर्ट डाउनलोड करने में त्रुटि');
+                    
+                    // Clean up on error
+                    hiddenContainer.innerHTML = '';
+                });
+            }, 1000);
+        }
+
+        // रिपोर्ट तैयार करने का फंक्शन (किसी specific element में) - साइड लेंथ सहित
+        function prepareReportInElement(element, data) {
+            element.querySelector('#reportAccount').innerText = data.properties.Account || "N/A";
+            element.querySelector('#reportPlot').innerText = data.properties.Name || "N/A";
+            element.querySelector('#reportThana').innerText = data.properties.Thana || "N/A";
+            element.querySelector('#reportOwner').innerText = data.properties.Owner || "N/A";
+            element.querySelector('#reportVillage').innerText = data.properties.Village || "N/A";
+            element.querySelector('#reportBlock').innerText = data.properties.Block || "N/A";
+            element.querySelector('#reportDistrict').innerText = data.properties.District || "N/A";
+            
+            // Use current user's name instead of officer name
+            element.querySelector('#officerName').innerText = currentUser ? currentUser.name : "User";
+            
+            element.querySelector('#descriptionText').innerText = data.properties.Description || "N/A";
+
+            const area_m2 = turf.area(data);
+            element.querySelector('#reportArea').innerText = formatSelected(area_m2, document.getElementById('unitSelect'));
+
+            element.querySelector('#reportDateTime').innerText = new Date().toLocaleString('en-IN', {timeZone: 'Asia/Kolkata'});
+
+            // Draw boundary on the canvas in the cloned element
+            const canvas = element.querySelector('#reportCanvas');
+            const ctx = canvas.getContext("2d");
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = "#e11d48";
+            ctx.lineWidth = 2;
+
+            const coords = data.geometry.coordinates[0];
+            const lons = coords.map(c => c[0]);
+            const lats = coords.map(c => c[1]);
+            const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+            const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+
+            const pad = 20;
+            const scaleX = (canvas.width - 2 * pad) / (maxLon - minLon);
+            const scaleY = (canvas.height - 2 * pad) / (maxLat - minLat);
+            const scale = Math.min(scaleX, scaleY);
+
+            ctx.beginPath();
+            coords.forEach(([lon, lat], i) => {
+                const x = pad + (lon - minLon) * scale;
+                const y = canvas.height - pad - (lat - minLat) * scale;
+                if (i == 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.closePath();
+            ctx.stroke();
+
+            // Draw area in the center
+            const areaText = formatSelected(area_m2, document.getElementById('unitSelect'));
+            const center = turf.center(data);
+            const centerX = pad + (center.geometry.coordinates[0] - minLon) * scale;
+            const centerY = canvas.height - pad - (center.geometry.coordinates[1] - minLat) * scale;
+            
+            ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+            ctx.fillRect(centerX - 60, centerY - 10, 120, 20);
+            
+            ctx.fillStyle = "#000";
+            ctx.font = "bold 14px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText(areaText, centerX, centerY + 5);
+
+            // Reset text alignment
+            ctx.textAlign = "left";
+            
+            // Draw side lengths (यह भाग जोड़ा गया है)
+            ctx.fillStyle = "#000";
+            ctx.font = "10px Arial";
+            for(let i = 0; i < coords.length - 1; i++){
+                const start = coords[i], end = coords[i + 1];
+                const mid = turf.midpoint(turf.point(start), turf.point(end));
+                const lenFeet = turf.length(turf.lineString([start, end]), {units: "feet"});
+                const mx = pad + (mid.geometry.coordinates[0] - minLon) * scale;
+                const my = canvas.height - pad - (mid.geometry.coordinates[1] - minLat) * scale;
+                ctx.fillText(`${lenFeet.toFixed(1)} ft`, mx, my);
+            }
+            
+            // Generate QR Code for the cloned element - NEW
+            const qrCanvas = element.querySelector('#qrCodeCanvas');
+            if (qrCanvas) {
+                const qrCtx = qrCanvas.getContext('2d');
+                qrCtx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+                
+                const plotData = {
+                    plotNumber: data.properties.Name || "N/A",
+                    accountNumber: data.properties.Account || "N/A",
+                    owner: data.properties.Owner || "N/A",
+                    village: data.properties.Village || "N/A",
+                    district: data.properties.District || "N/A",
+                    area: formatSelected(area_m2, document.getElementById('unitSelect')),
+                    timestamp: new Date().toISOString(),
+                    verification: "PlotLocator Digital Report",
+                    verifiedBy: currentUser ? currentUser.name : "User"
+                };
+                
+                const qrData = JSON.stringify(plotData);
+                
+                try {
+                    // Use qrcode-generator library
+                    const typeNumber = 0; // Auto detect
+                    const errorCorrectionLevel = 'L';
+                    const qr = qrcode(typeNumber, errorCorrectionLevel);
+                    qr.addData(qrData);
+                    qr.make();
+                    
+                    const cellSize = 4;
+                    const margin = 1;
+                    
+                    // Draw QR code
+                    for (let row = 0; row < qr.getModuleCount(); row++) {
+                        for (let col = 0; col < qr.getModuleCount(); col++) {
+                            qrCtx.fillStyle = qr.isDark(row, col) ? '#000000' : '#FFFFFF';
+                            qrCtx.fillRect(
+                                margin + col * cellSize,
+                                margin + row * cellSize,
+                                cellSize,
+                                cellSize
+                            );
+                        }
+                    }
+                } catch (error) {
+                    console.error('QR Code error in clone:', error);
+                    // Fallback
+                    qrCtx.fillStyle = '#f0f0f0';
+                    qrCtx.fillRect(0, 0, qrCanvas.width, qrCanvas.height);
+                    qrCtx.fillStyle = '#000';
+                    qrCtx.font = '8px Arial';
+                    qrCtx.textAlign = 'center';
+                    qrCtx.fillText('Digital Report', qrCanvas.width/2, qrCanvas.height/2);
+                }
+            }
+        }
+
+        // नए डाउनलोड बटन के लिए इवेंट लिसनर जोड़ें
+        document.getElementById('downloadReportBtn').addEventListener('click', function() {
+            if (!currentMeasurementPoly) {
+                toast('पहले एक प्लॉट बनाएं या माप पूरा करें');
+                return;
+            }
+
+            const feature = {
+                type: 'Feature',
+                geometry: currentMeasurementPoly.geometry,
+                properties: {
+                    Account: document.getElementById("inputAccount").value || "N/A",
+                    Name: document.getElementById("inputPlot").value || "Unknown Plot",
+                    Thana: document.getElementById("inputThana").value || "N/A",
+                    Owner: document.getElementById("inputOwner").value || "N/A",
+                    Village: document.getElementById("inputVillage").value || "N/A",
+                    Block: document.getElementById("inputBlock").value || "N/A",
+                    District: document.getElementById("inputDistrict").value || "N/A",
+                    Description: document.getElementById("inputDescription").value || "N/A"
+                }
+            };
+
+            // Show loading message
+            toast('रिपोर्ट तैयार की जा रही है...');
+            
+            // Start download process
+            setTimeout(() => {
+                downloadReportDirectly(feature);
+            }, 500);
+        });
+
+        // मौजूदा Save बटन के लिए इवेंट लिसनर (यह पहले से मौजूद है)
+        document.getElementById('savePlotInfo').addEventListener('click', function() {
+            if (!currentMeasurementPoly) {
+                toast('पहले एक प्लॉट बनाएं या माप पूरा करें');
+                return;
+            }
+
+            const feature = {
+                type: 'Feature',
+                geometry: currentMeasurementPoly.geometry,
+                properties: {
+                    Account: document.getElementById("inputAccount").value,
+                    Name: document.getElementById("inputPlot").value,
+                    Thana: document.getElementById("inputThana").value,
+                    Owner: document.getElementById("inputOwner").value,
+                    Village: document.getElementById("inputVillage").value,
+                    Block: document.getElementById("inputBlock").value,
+                    District: document.getElementById("inputDistrict").value,
+                    Description: document.getElementById("inputDescription").value
+                }
+            };
+
+            document.getElementById("plotInfoModalBackdrop").style.display = "none";
+            openReport({feature: feature});
+        });
+
+        document.getElementById('closeReportBtn').addEventListener('click', function() {
+            document.getElementById('reportModalBackdrop').style.display = 'none';
+        });
+
+        document.getElementById("exportJPGBtn").addEventListener('click', function() {
+            let report = document.getElementById("reportModal");
+            html2canvas(report).then(canvas => {
+                let link = document.createElement("a");
+                link.download = "plot_report.jpg";
+                link.href = canvas.toDataURL("image/jpeg", 1.0);
+                link.click();
+            });
+        });
+    </script>
+</body>
+</html>
